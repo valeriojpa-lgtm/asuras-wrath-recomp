@@ -25,33 +25,9 @@ jobs:
           choco install llvm cmake ninja -y --no-progress
 
       - name: Apply Windows startup patch
-        shell: powershell
+        shell: cmd
         run: |
-          $path = "tools\rexglue\src\core\filesystem_win.cpp"
-          $text = Get-Content $path -Raw
-          $old = @'
-std::filesystem::path GetExecutablePath() {
-  wchar_t* path;
-  auto error = _get_wpgmptr(&path);
-  return !error ? std::filesystem::path(path) : std::filesystem::path();
-}
-'@
-          $new = @'
-std::filesystem::path GetExecutablePath() {
-  std::wstring path(32768, L'\0');
-  DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-  if (length == 0 || length >= path.size()) {
-    return std::filesystem::path();
-  }
-  path.resize(length);
-  return std::filesystem::path(path);
-}
-'@
-          if (-not $text.Contains($old)) {
-            throw "Expected GetExecutablePath block not found."
-          }
-          $text = $text.Replace($old, $new)
-          Set-Content -Path $path -Value $text -Encoding UTF8
+          python tools\apply_win_startup_fix.py
 
       - name: Show tool versions
         shell: cmd
