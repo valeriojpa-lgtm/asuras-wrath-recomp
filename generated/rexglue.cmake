@@ -114,7 +114,9 @@ endmacro()
 # codegen, including one a project assembles itself rather than taking the
 # library rexglue_setup_target() builds. The stamp comes first: the DEPFILE
 # names it.
-if(NOT CMAKE_CROSSCOMPILING)
+option(ASURA_SKIP_CODEGEN "Use checked-in generated C++ and skip XEX code generation" OFF)
+
+if(NOT CMAKE_CROSSCOMPILING AND NOT ASURA_SKIP_CODEGEN)
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp"
                ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
@@ -127,6 +129,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_custom_target(asura_wrath_codegen
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp")
 else()
+    if(ASURA_SKIP_CODEGEN)
+        message(STATUS "ASURA_SKIP_CODEGEN=ON: using checked-in generated C++ sources")
+    endif()
     add_custom_target(asura_wrath_codegen)
 endif()
 
