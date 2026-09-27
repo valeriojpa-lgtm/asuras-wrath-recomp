@@ -35,7 +35,20 @@ jobs:
       - name: Build and package RUN 00
         shell: cmd
         run: |
-          call build.bat --package
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+          if not exist out\dist mkdir out\dist
+          if exist out\dist\asura_wrath_recomp_windows_x86_64 rmdir /s /q out\dist\asura_wrath_recomp_windows_x86_64
+          mkdir out\dist\asura_wrath_recomp_windows_x86_64
+
+          copy /y out\build\win-amd64-release\asura_wrath_recomp.exe out\dist\asura_wrath_recomp_windows_x86_64\ >nul
+          if exist out\build\win-amd64-release\*.dll copy /y out\build\win-amd64-release\*.dll out\dist\asura_wrath_recomp_windows_x86_64\ >nul
+          if exist tools\rexglue\out\win-amd64\*.dll copy /y tools\rexglue\out\win-amd64\*.dll out\dist\asura_wrath_recomp_windows_x86_64\ >nul
+
+          powershell -NoProfile -Command "Compress-Archive -Path 'out\dist\asura_wrath_recomp_windows_x86_64\*' -DestinationPath 'out\dist\asura_wrath_recomp_windows_x86_64.zip' -Force"
 
       - name: Verify output
         shell: powershell
