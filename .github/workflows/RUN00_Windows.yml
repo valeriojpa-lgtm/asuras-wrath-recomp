@@ -24,6 +24,11 @@ jobs:
         run: |
           choco install llvm cmake ninja -y --no-progress
 
+      - name: Apply Windows startup patch
+        shell: cmd
+        run: |
+          git -C tools\rexglue apply ..\..\patches\rexglue-win-getexecutablepath.patch
+
       - name: Show tool versions
         shell: cmd
         run: |
