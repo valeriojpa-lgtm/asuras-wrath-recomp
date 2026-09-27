@@ -1,4 +1,4 @@
-name: RUN 00 - Windows x64
+name: RUN 01 - Windows x64 PC Layout
 
 on:
   workflow_dispatch:
@@ -46,14 +46,14 @@ jobs:
           if errorlevel 1 exit /b %errorlevel%
 
           if not exist out\dist mkdir out\dist
-          if exist out\dist\asura_wrath_recomp_windows_x86_64 rmdir /s /q out\dist\asura_wrath_recomp_windows_x86_64
-          mkdir out\dist\asura_wrath_recomp_windows_x86_64
+          if exist out\dist\Asuras_Wrath_Windows_x86_64 rmdir /s /q out\dist\Asuras_Wrath_Windows_x86_64
+          mkdir out\dist\Asuras_Wrath_Windows_x86_64
 
-          copy /y out\build\win-amd64-release\asura_wrath_recomp.exe out\dist\asura_wrath_recomp_windows_x86_64\ >nul
-          if exist out\build\win-amd64-release\*.dll copy /y out\build\win-amd64-release\*.dll out\dist\asura_wrath_recomp_windows_x86_64\ >nul
-          if exist tools\rexglue\out\win-amd64\*.dll copy /y tools\rexglue\out\win-amd64\*.dll out\dist\asura_wrath_recomp_windows_x86_64\ >nul
+          copy /y "out\build\win-amd64-release\Asura's Wrath.exe" "out\dist\Asuras_Wrath_Windows_x86_64\" >nul
+          if exist out\build\win-amd64-release\*.dll copy /y out\build\win-amd64-release\*.dll out\dist\Asuras_Wrath_Windows_x86_64\ >nul
+          if exist tools\rexglue\out\win-amd64\*.dll copy /y tools\rexglue\out\win-amd64\*.dll out\dist\Asuras_Wrath_Windows_x86_64\ >nul
 
-          powershell -NoProfile -Command "Compress-Archive -Path 'out\dist\asura_wrath_recomp_windows_x86_64\*' -DestinationPath 'out\dist\asura_wrath_recomp_windows_x86_64.zip' -Force"
+          powershell -NoProfile -Command "Compress-Archive -Path 'out\dist\Asuras_Wrath_Windows_x86_64\*' -DestinationPath 'out\dist\Asuras_Wrath_Windows_x86_64.zip' -Force"
 
       - name: Verify output
         shell: powershell
@@ -70,7 +70,7 @@ jobs:
       - name: Upload RUN 00 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASURA_RECOMP_RUN00
+          name: ASURAS_WRATH_PC_LAYOUT
           path: out/dist/*.zip
           if-no-files-found: error
           retention-days: 30

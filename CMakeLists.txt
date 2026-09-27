@@ -74,7 +74,11 @@ elseif(APPLE)
   target_link_options(asura_wrath_recomp PRIVATE "-Wl,-rpath,${REXSDK_DIR}/out/${REX_PLATFORM}:@executable_path/../../../tools/rexglue/out/${REX_PLATFORM}:@executable_path")
 endif()
 
-set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "asura_wrath_recomp")
+if(WIN32 AND NOT ANDROID)
+  set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "Asura's Wrath")
+else()
+  set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "asura_wrath_recomp")
+endif()
 
 set(REXGLUE_RECOMP_DEBUG_INFO "none" CACHE STRING "Debug info level" FORCE)
 

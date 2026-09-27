@@ -5,6 +5,7 @@
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/disc_image_device.h>
 #include <rex/filesystem/devices/disc_image_entry.h>
+#include <rex/filesystem/devices/host_path_device.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 
@@ -167,7 +168,64 @@ public:
     }
   }
 
+  void SetupPcDataLayoutAliases() {
+    auto *rt = runtime();
+    if (!rt || !rt->file_system()) {
+      return;
+    }
+
+    auto *vfs = rt->file_system();
+    const auto data_root = game_data_root();
+    const auto content_dir = data_root / "Game" / "Content";
+    const auto cinematics_dir = data_root / "Game" / "Cinematics";
+
+    auto register_alias = [&](const std::filesystem::path &host_dir,
+                              std::string_view device_path,
+                              std::string_view guest_path) -> bool {
+      std::error_code ec;
+      if (!std::filesystem::is_directory(host_dir, ec)) {
+        return false;
+      }
+
+      auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+          device_path, host_dir, true);
+      if (!device->Initialize()) {
+        REXLOG_ERROR("Failed to initialize PC data alias device {} -> {}",
+                     device_path, host_dir.string());
+        return false;
+      }
+      if (!vfs->RegisterDevice(std::move(device))) {
+        REXLOG_ERROR("Failed to register PC data alias device {}", device_path);
+        return false;
+      }
+      if (!vfs->RegisterSymbolicLink(guest_path, device_path)) {
+        REXLOG_ERROR("Failed to register PC data alias {} -> {}", guest_path,
+                     device_path);
+        return false;
+      }
+
+      REXLOG_INFO("PC data alias: {} -> {}", guest_path, host_dir.string());
+      return true;
+    };
+
+    // The game still requests the original Xbox 360 paths. Keep those guest
+    // paths intact while presenting a clean PC-facing layout on disk:
+    //
+    //   Data/Game/Content     <-> BCGame/CookedXbox360
+    //   Data/Game/Cinematics  <-> BCGame/Movies
+    //
+    // game: and d: are first resolved by ReXGlue to Partition1, so aliases are
+    // registered against the resolved device paths.
+    register_alias(
+        content_dir, "\\Device\\AsuraWrathContent",
+        "\\Device\\Harddisk0\\Partition1\\BCGame\\CookedXbox360");
+    register_alias(
+        cinematics_dir, "\\Device\\AsuraWrathCinematics",
+        "\\Device\\Harddisk0\\Partition1\\BCGame\\Movies");
+  }
+
   void OnPostSetup() override {
+    SetupPcDataLayoutAliases();
 #if defined(__ANDROID__)
     SetupVirtualGamepad();
 #endif
@@ -195,6 +253,10 @@ public:
       }
       if (std::filesystem::exists(dir / "default.xex", ec)) {
         out_path = dir;
+        return true;
+      }
+      if (std::filesystem::exists(dir / "Data" / "default.xex", ec)) {
+        out_path = dir / "Data";
         return true;
       }
       if (std::filesystem::exists(dir / "BCGame" / "default.xex", ec)) {
