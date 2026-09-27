@@ -1,0 +1,21 @@
+diff --git a/src/core/filesystem_win.cpp b/src/core/filesystem_win.cpp
+index 4b9f3c7..0000000 100644
+--- a/src/core/filesystem_win.cpp
++++ b/src/core/filesystem_win.cpp
+@@ -34,9 +34,13 @@ std::filesystem::path to_path(const std::u16string_view source) {
+ namespace filesystem {
+ 
+ std::filesystem::path GetExecutablePath() {
+-  wchar_t* path;
+-  auto error = _get_wpgmptr(&path);
+-  return !error ? std::filesystem::path(path) : std::filesystem::path();
++  // Avoid _get_wpgmptr here. In the Windows recomp build it can hit the
++  // UCRT invalid-parameter fail-fast path before normal runtime setup.
++  std::wstring path(32768, L'\0');
++  DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
++  if (length == 0 || length >= path.size()) return {};
++  path.resize(length);
++  return std::filesystem::path(path);
+ }
+ 
+ std::filesystem::path GetExecutableFolder() {
