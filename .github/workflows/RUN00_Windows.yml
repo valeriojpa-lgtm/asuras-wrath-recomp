@@ -1,0 +1,58 @@
+name: RUN 00 - Windows x64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Asura's Wrath Recomp
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build and package RUN 00
+        shell: cmd
+        run: |
+          call build.bat --package
+
+      - name: Verify output
+        shell: powershell
+        run: |
+          Write-Host "=== out/dist ==="
+          Get-ChildItem -Recurse out\dist
+          $zip = Get-ChildItem out\dist\*.zip | Select-Object -First 1
+          if (-not $zip) {
+            throw "RUN 00 package ZIP was not created."
+          }
+          Write-Host "Package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload RUN 00 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_RECOMP_RUN00
+          path: out/dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
