@@ -1,0 +1,140 @@
+name: ASURA Offline TU Tool Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_OFFLINE_TOOL_LINUX.yml"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "tools/asura_tu_image_audit.cpp"
+      - "tu01/ASURA_TU01_GENERATED.zip.part01"
+      - "tu01/ASURA_TU01_GENERATED.zip.part02"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asura-offline-tu-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Linux offline TU image tool
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake clang lld libgtk-3-dev libasound2-dev libpulse-dev
+
+      - name: Reconstruct verified TU01 generated checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/ASURA_TU01_GENERATED.zip"
+          cat tu01/ASURA_TU01_GENERATED.zip.part01 \
+              tu01/ASURA_TU01_GENERATED.zip.part02 > "$payload"
+
+          expected="29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+          actual="$(sha256sum "$payload" | awk '{print $1}')"
+          test "$actual" = "$expected"
+
+          stage="$RUNNER_TEMP/asura-tu01-generated"
+          rm -rf "$stage" generated/default
+          mkdir -p "$stage"
+
+          python3 - "$payload" "$stage" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          root = pathlib.Path(sys.argv[2]).resolve()
+          with zipfile.ZipFile(archive) as zf:
+              for info in zf.infolist():
+                  rel = pathlib.PurePosixPath(info.filename.replace("\\", "/"))
+                  if rel.is_absolute() or ".." in rel.parts:
+                      raise SystemExit(f"unsafe ZIP member: {info.filename!r}")
+                  target = root.joinpath(*rel.parts)
+                  if info.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with zf.open(info) as src, target.open("wb") as dst:
+                      while chunk := src.read(1024 * 1024):
+                          dst.write(chunk)
+          PY
+
+          mkdir -p generated
+          cp -a "$stage/generated/default" generated/default
+
+      - name: Configure Linux release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B out/build/linux-offline-tool -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DASURA_SKIP_CODEGEN=ON \
+            -DREXGLUE_USE_VULKAN=ON \
+            -DREXGLUE_USE_D3D12=OFF
+
+      - name: Build offline tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build out/build/linux-offline-tool \
+            --target asura_tu_image_audit --parallel
+
+      - name: Stage runtime bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/offline-tool/lib
+
+          tool="$(find out/build/linux-offline-tool -maxdepth 4 -type f -name 'asura_tu_image_audit' -perm -111 | head -1)"
+          if [ -z "$tool" ]; then
+            echo "offline tool executable not found"
+            find out/build/linux-offline-tool -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
+          cp "$tool" out/offline-tool/asura_tu_image_audit
+          chmod +x out/offline-tool/asura_tu_image_audit
+
+          # Package project-built shared libraries only. System libraries stay
+          # provided by the Linux host.
+          find tools/rexglue/out out/build/linux-offline-tool \
+            -type f \( -name '*.so' -o -name '*.so.*' \) -print0 2>/dev/null |
+            while IFS= read -r -d '' so; do
+              cp -L "$so" out/offline-tool/lib/ || true
+            done
+
+          echo "=== ldd ==="
+          LD_LIBRARY_PATH="$PWD/out/offline-tool/lib" ldd out/offline-tool/asura_tu_image_audit || true
+          echo "=== staged ==="
+          find out/offline-tool -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
+
+          tar -C out -czf out/ASURA_TU01_OFFLINE_TOOL_LINUX.tar.gz offline-tool
+
+      - name: Upload Linux offline tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_TU01_OFFLINE_TOOL_LINUX
+          path: out/ASURA_TU01_OFFLINE_TOOL_LINUX.tar.gz
+          if-no-files-found: error
+          retention-days: 7
