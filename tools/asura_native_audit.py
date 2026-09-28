@@ -489,6 +489,10 @@ def main() -> int:
         else:
             audit.candidate("REVIEW", addr, "literal indirect target is in code range but unregistered")
 
+    # Build a lightweight generated-source index so historical runtime targets
+    # can be classified as internal labels when the emitted C++ proves it.
+    generated_text_by_file = {p.name: read_text(p) for p in partitions}
+
     for addr in sorted(KNOWN_REVIEW_TARGETS):
         if addr in registrations:
             audit.candidate(
@@ -497,16 +501,59 @@ def main() -> int:
                 "historical runtime target is now statically registered",
                 symbol=registrations[addr],
             )
-        else:
-            neighbors = [
-                (a, n)
-                for a, n in registrations.items()
-                if abs(a - addr) <= 0x100
+            continue
+
+        lower_entries = [(a, n) for a, n in registrations.items() if a < addr]
+        upper_entries = [(a, n) for a, n in registrations.items() if a > addr]
+        owner_addr, owner_name = max(lower_entries) if lower_entries else (None, None)
+        next_addr, next_name = min(upper_entries) if upper_entries else (None, None)
+
+        internal_label = f"loc_{addr:X}:"
+        label_files = [
+            name for name, text in generated_text_by_file.items()
+            if internal_label in text
+        ]
+
+        owner_files = []
+        if owner_name:
+            owner_marker = f"DEFINE_REX_FUNC({owner_name})"
+            owner_files = [
+                name for name, text in generated_text_by_file.items()
+                if owner_marker in text
             ]
+
+        same_file_label = bool(
+            label_files and owner_files and set(label_files) & set(owner_files)
+        )
+
+        neighbors = [
+            (a, n)
+            for a, n in registrations.items()
+            if abs(a - addr) <= 0x100
+        ]
+
+        if same_file_label:
+            audit.candidate(
+                "HIGH_CONFIDENCE",
+                addr,
+                "unregistered runtime target is emitted as an internal C++ label inside the containing generated partition; do not alias blindly",
+                owner=(f"0x{owner_addr:08X}", owner_name) if owner_addr is not None else None,
+                next_entry=(f"0x{next_addr:08X}", next_name) if next_addr is not None else None,
+                label=internal_label,
+                files=sorted(set(label_files) & set(owner_files)),
+                offset_from_owner=(addr - owner_addr) if owner_addr is not None else None,
+            )
+        else:
             audit.candidate(
                 "REVIEW",
                 addr,
                 "historical runtime target remains unregistered; no alias inferred",
+                owner=(f"0x{owner_addr:08X}", owner_name) if owner_addr is not None else None,
+                next_entry=(f"0x{next_addr:08X}", next_name) if next_addr is not None else None,
+                offset_from_owner=(addr - owner_addr) if owner_addr is not None else None,
+                label_present=bool(label_files),
+                owner_files=owner_files,
+                label_files=label_files,
                 neighbors=[(f"0x{a:08X}", n) for a, n in sorted(neighbors)],
             )
 
