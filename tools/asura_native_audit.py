@@ -634,13 +634,32 @@ def main() -> int:
     cmake_path = root / "CMakeLists.txt"
     if cmake_path.is_file():
         cmake = read_text(cmake_path)
-        if "-mavx2" in cmake:
+        avx2_opt_in = (
+            "option(ASURA_REQUIRE_AVX2" in cmake
+            and '"Build the x86-64 executable with an AVX2/FMA CPU requirement" OFF)' in cmake
+            and "if(ASURA_REQUIRE_AVX2" in cmake
+        )
+        if "-mavx2" in cmake and not avx2_opt_in:
             audit.warn(
                 "portable.cpu",
-                "host binary currently requires AVX2; consider runtime dispatch/baseline ISA for wider PC portability",
+                "host binary has an unconditional AVX2 requirement; portable x86-64 baseline is not preserved",
             )
         else:
-            audit.ok("portable.cpu", "no unconditional AVX2 compiler requirement detected")
+            audit.ok(
+                "portable.cpu",
+                "portable build has no unconditional AVX2/FMA requirement",
+            )
+
+        if "-ffast-math" in cmake:
+            audit.warn(
+                "fidelity.fp",
+                "fast-math is enabled and may alter guest floating-point semantics",
+            )
+        else:
+            audit.ok(
+                "fidelity.fp",
+                "fast-math is disabled; strict ReXGlue floating-point policy is not overridden",
+            )
 
     metadata = {
         "expected_generated_sha256": EXPECTED_TU_GENERATED_SHA256,
