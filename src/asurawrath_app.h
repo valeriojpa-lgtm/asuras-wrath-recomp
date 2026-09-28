@@ -339,9 +339,9 @@ public:
             std::filesystem::remove(paths.user_data_root / "Asura's Wrath.iso",
                                     ec);
             std::filesystem::remove(dest_dir / "Asura's Wrath.iso", ec);
-            std::filesystem::path new_resolved;
-            if (resolve_game_dir(dest_dir, new_resolved)) {
-              paths.game_data_root = new_resolved;
+            if (auto resolved_after_extract =
+                    host.ResolveGameDataRoot(dest_dir, dest_dir)) {
+              paths.game_data_root = *resolved_after_extract;
             } else {
               paths.game_data_root = dest_dir;
             }
@@ -351,9 +351,9 @@ public:
           std::filesystem::remove(paths.user_data_root / "Asura's Wrath.iso",
                                   ec);
           std::filesystem::remove(dest_dir / "Asura's Wrath.iso", ec);
-          std::filesystem::path new_resolved;
-          if (resolve_game_dir(dest_dir, new_resolved)) {
-            paths.game_data_root = new_resolved;
+          if (auto resolved_after_extract =
+                  host.ResolveGameDataRoot(dest_dir, dest_dir)) {
+            paths.game_data_root = *resolved_after_extract;
           } else {
             paths.game_data_root = dest_dir;
           }
