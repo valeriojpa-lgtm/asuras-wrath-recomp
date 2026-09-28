@@ -1,4 +1,4 @@
-name: RUN 05 - Graphics Quality Launcher
+name: TU01 - Native Build
 
 on:
   workflow_dispatch:
@@ -24,6 +24,43 @@ jobs:
         run: |
           choco install llvm cmake ninja -y --no-progress
 
+      - name: Install verified TU01 generated source
+        shell: powershell
+        run: |
+          $payload = "tu01/ASURA_TU01_GENERATED.zip"
+          $expected = "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+
+          if (-not (Test-Path $payload)) {
+            throw "Missing TU01 payload: $payload"
+          }
+
+          $actual = (Get-FileHash $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "TU01 payload SHA-256: $actual"
+          if ($actual -ne $expected) {
+            throw "TU01 payload SHA-256 mismatch. Expected $expected, got $actual"
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "asura-tu01"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
+
+          $generated = Join-Path $stage "generated/default"
+          if (-not (Test-Path $generated)) {
+            throw "TU01 archive does not contain generated/default"
+          }
+
+          if (Test-Path "generated/default") {
+            Remove-Item "generated/default" -Recurse -Force
+          }
+          Copy-Item $generated "generated/default" -Recurse -Force
+
+          $cppCount = (Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp").Count
+          if ($cppCount -ne 207) {
+            throw "Unexpected TU01 partition count: $cppCount (expected 207)"
+          }
+          Write-Host "TU01 generated/default installed: $cppCount partitions"
+
       - name: Apply ReXGlue startup and VFS patches
         shell: cmd
         run: |
@@ -37,7 +74,7 @@ jobs:
           clang --version
           ninja --version
 
-      - name: Build and package RUN 05
+      - name: Build and package TU01
         shell: cmd
         run: |
           cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
@@ -62,15 +99,15 @@ jobs:
           Get-ChildItem -Recurse out\dist
           $zip = Get-ChildItem out\dist\*.zip | Select-Object -First 1
           if (-not $zip) {
-            throw "RUN 05 package ZIP was not created."
+            throw "TU01 package ZIP was not created."
           }
           Write-Host "Package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
-      - name: Upload RUN 05 artifact
+      - name: Upload TU01 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_GRAPHICS_LAUNCHER
+          name: ASURAS_WRATH_TU01_NATIVE
           path: out/dist/*.zip
           if-no-files-found: error
           retention-days: 30
