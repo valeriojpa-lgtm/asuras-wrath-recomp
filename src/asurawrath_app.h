@@ -5,6 +5,7 @@
 #include <fstream>
 #include <span>
 #include <vector>
+#include <unordered_set>
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/disc_image_device.h>
@@ -19,6 +20,7 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xmodule.h>
+#include <rex/system/xam/content_manager.h>
 
 #if defined(__ANDROID__)
 #include <SDL3/SDL.h>
@@ -540,6 +542,137 @@ public:
         "\\Device\\Harddisk0\\Partition1\\BCGame\\Movies");
   }
 
+#if defined(_WIN32) && !defined(__ANDROID__)
+  void InstallUserOwnedDlc() {
+    auto *rt = runtime();
+    auto *kernel = rt ? rt->kernel_state() : nullptr;
+    auto *content = kernel ? kernel->content_manager() : nullptr;
+    if (!kernel || !content) {
+      REXLOG_WARN("DLC: ContentManager unavailable; skipping optional content scan");
+      return;
+    }
+
+    if (kernel->title_id() != kAsuraTitleId) {
+      REXLOG_ERROR("DLC: loaded Title ID {:08X} does not match Asura's Wrath {:08X}; skipping",
+                   kernel->title_id(), kAsuraTitleId);
+      return;
+    }
+
+    const auto dlc_dir =
+        rex::filesystem::GetExecutableFolder() / "Data" / "DLC";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dlc_dir, ec)) {
+      REXLOG_INFO("DLC: no Data/DLC directory found; optional content disabled");
+      return;
+    }
+
+    std::unordered_set<std::string> installed;
+    for (const auto &item :
+         content->ListContent(0, 0,
+                              rex::system::XContentType::kMarketplaceContent,
+                              kAsuraTitleId)) {
+      installed.insert(item.file_name());
+    }
+
+    size_t accepted = 0;
+    size_t installed_now = 0;
+    size_t already_installed = 0;
+    size_t rejected = 0;
+    size_t failed = 0;
+
+    for (std::filesystem::directory_iterator it(dlc_dir, ec), end;
+         it != end && !ec; it.increment(ec)) {
+      if (!it->is_regular_file(ec)) {
+        continue;
+      }
+
+      const auto package_path = it->path();
+      const auto package_name = package_path.filename().string();
+
+      auto header =
+          rex::filesystem::StfsContainerDevice::ReadPackageHeader(package_path);
+      if (!header) {
+        REXLOG_WARN("DLC: rejecting {} (not a valid STFS package)",
+                    package_name);
+        ++rejected;
+        continue;
+      }
+
+      const uint32_t title_id =
+          static_cast<uint32_t>(header->metadata.execution_info.title_id);
+      const auto content_type =
+          static_cast<rex::system::XContentType>(header->metadata.content_type);
+
+      if (title_id != kAsuraTitleId) {
+        REXLOG_WARN("DLC: rejecting {} (Title ID {:08X}, expected {:08X})",
+                    package_name, title_id, kAsuraTitleId);
+        ++rejected;
+        continue;
+      }
+      if (content_type != rex::system::XContentType::kMarketplaceContent) {
+        REXLOG_WARN(
+            "DLC: rejecting {} (content type {:08X}, expected Marketplace 00000002)",
+            package_name, static_cast<uint32_t>(content_type));
+        ++rejected;
+        continue;
+      }
+
+      // Match ReXGlue's 42-byte XCONTENT filename semantics before checking
+      // idempotency, so long host filenames cannot cause repeated installs.
+      rex::system::xam::XCONTENT_AGGREGATE_DATA content_data;
+      content_data.device_id = 0;
+      content_data.content_type =
+          rex::system::XContentType::kMarketplaceContent;
+      content_data.title_id = kAsuraTitleId;
+      content_data.xuid = 0;
+      content_data.set_file_name(package_name);
+      const std::string content_name = content_data.file_name();
+
+      ++accepted;
+      if (installed.contains(content_name)) {
+        ++already_installed;
+        REXLOG_INFO("DLC: already installed, preserving {}", package_name);
+        continue;
+      }
+
+      // Deep-parse the package before extracting anything to UserData.
+      {
+        rex::filesystem::StfsContainerDevice verifier("dlc-verify:",
+                                                       package_path);
+        if (!verifier.Initialize()) {
+          REXLOG_WARN("DLC: rejecting {} (STFS filesystem validation failed)",
+                      package_name);
+          ++rejected;
+          continue;
+        }
+      }
+
+      const auto result = content->InstallContent(package_path);
+      if (XSUCCEEDED(result)) {
+        installed.insert(content_name);
+        ++installed_now;
+        REXLOG_INFO("DLC: installed user-owned package {}", package_name);
+      } else {
+        // InstallContent extracts to UserData. If a host write fails partway,
+        // remove only this previously-uninstalled package's derived copy.
+        content->DeleteContent(0, content_data);
+        ++failed;
+        REXLOG_ERROR("DLC: failed to install {} (result {:08X}); partial derived copy removed",
+                     package_name, static_cast<uint32_t>(result));
+      }
+    }
+
+    if (ec) {
+      REXLOG_WARN("DLC: directory scan ended with host error: {}", ec.message());
+      ++failed;
+    }
+
+    REXLOG_INFO(
+        "DLC: scan complete - accepted {}, newly installed {}, already present {}, rejected {}, failed {}",
+        accepted, installed_now, already_installed, rejected, failed);
+  }
+#endif
+
   void OnPostSetup() override {
     SetupPcDataLayoutAliases();
 #if defined(__ANDROID__)
@@ -586,6 +719,11 @@ public:
     }
 
     REXLOG_INFO("TU01 image verified: entrypoint {:08X}", loaded_entry);
+
+    // Optional owned DLC is installed only after the patched TU01 image has
+    // been loaded and verified. Source STFS packages under Data/DLC remain
+    // untouched; ReXGlue extracts managed copies under portable UserData.
+    InstallUserOwnedDlc();
 #endif
     return true;
   }
