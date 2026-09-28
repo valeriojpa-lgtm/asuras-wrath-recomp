@@ -1,0 +1,85 @@
+name: DLC Lab - Native Autoinstall Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout DLC lab
+        uses: actions/checkout@v4
+        with:
+          ref: dlc-lab
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build toolchain
+        shell: powershell
+        run: |
+          choco install ninja -y --no-progress
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          cmake --version
+          clang-cl --version
+          ninja --version
+
+      - name: Configure DLC lab
+        shell: cmd
+        run: |
+          if exist out\build\win-amd64-release rmdir /s /q out\build\win-amd64-release
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DASURA_DLC_LAB_AUTOINSTALL=ON
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Build DLC lab only
+        shell: cmd
+        run: |
+          cmake --build --preset win-amd64-release --target asura_wrath_recomp
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Package native DLC lab
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem -Path out -Recurse -Filter "Asura's Wrath.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "Asura's Wrath.exe was not produced."
+          }
+
+          $root = "out/dlc-lab-package"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Copy-Item $exe.FullName (Join-Path $root "Asura's Wrath.exe")
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "Data/DLC") | Out-Null
+
+          @"
+          ASURA'S WRATH - DLC LAB BUILD
+
+          Portable native build.
+          No Python. No installer.
+
+          This build is isolated from TU01 and exists only to validate the
+          Data\DLC autoinstall integration.
+
+          Put original Marketplace STFS packages in:
+            Data\DLC\
+
+          The lab validates:
+            Title ID 43430817
+            Marketplace content type 0x00000002
+
+          It skips already-installed packages and uses ReXGlue ContentManager.
+          "@ | Set-Content -Encoding UTF8 (Join-Path $root "DLC_LAB_README.txt")
+
+      - name: Upload DLC lab artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_DLC_LAB_NATIVE
+          path: out/dlc-lab-package/*
+          if-no-files-found: error
+          retention-days: 30
