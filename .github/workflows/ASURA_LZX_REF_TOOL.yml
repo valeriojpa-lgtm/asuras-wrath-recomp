@@ -20,12 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout ReXGlue submodule
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 1
-          persist-credentials: false
+
+      - name: Fetch only ReXGlue + libmspack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule update --init --depth 1 tools/rexglue
+          git -C tools/rexglue submodule update --init --depth 1 thirdparty/libmspack
 
       - name: Build tiny LZX reference decoder
         shell: bash
