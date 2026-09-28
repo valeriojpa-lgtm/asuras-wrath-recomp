@@ -210,7 +210,7 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--input_backend=", "--user_language=", "--user_country=",
       "--save_data_root=", "--user_profile_name=", "--user_profile_xuid=",
-      "--asura_auto_first_save_prompt=",
+      "--asura_auto_first_save_prompt=", "--asura_first_run=",
   };
   std::erase_if(args, [](const std::string& arg) {
     for (const auto prefix : prefixes) {
@@ -272,6 +272,7 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_string("user_profile_name", profile.name);
   add_string("user_profile_xuid", std::to_string(profile.xuid));
   add_bool("asura_auto_first_save_prompt", true);
+  add_bool("asura_first_run", platform.saves().IsFirstRun(platform.files()));
 }
 
 HWND CreateLabel(HWND parent, HFONT font, const wchar_t* text,
