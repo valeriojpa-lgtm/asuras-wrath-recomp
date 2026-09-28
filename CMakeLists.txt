@@ -94,3 +94,23 @@ set(REXGLUE_RECOMP_DEBUG_INFO "none" CACHE STRING "Debug info level" FORCE)
 
 rexglue_setup_target(asura_wrath_recomp GPU_PLUGINS xenos)
 target_include_directories(asura_wrath_recomp PRIVATE ${REXSDK_DIR}/thirdparty/imgui ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+
+# Preservation/offline analysis tool. This is deliberately separate from the
+# game executable: it works only on user-owned XEX/XEXP inputs, stages copies in
+# a temporary directory, and exports the patched in-memory guest image for
+# static analysis without modifying preserved originals.
+if(NOT ANDROID)
+  add_executable(asura_tu_image_audit
+    tools/asura_tu_image_audit.cpp
+  )
+  target_link_libraries(asura_tu_image_audit PRIVATE rex::runtime)
+  target_include_directories(asura_tu_image_audit PRIVATE
+    ${REXSDK_DIR}/include
+  )
+  if(WIN32)
+    set_target_properties(asura_tu_image_audit PROPERTIES
+      OUTPUT_NAME "Asura TU01 Image Audit"
+    )
+  endif()
+endif()
