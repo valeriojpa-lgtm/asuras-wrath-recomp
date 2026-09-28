@@ -53,7 +53,11 @@ bool NativeSaveSystem::MigrateLegacyContent(
     }
 
     const auto name = it->path().filename().string();
-    if (!LooksLikeHexDirectory(name, 16)) {
+    const bool xuid_tree = LooksLikeHexDirectory(name, 16);
+    const bool title_profile_tree =
+        LooksLikeHexDirectory(name, 8) &&
+        files.IsDirectory(it->path() / "profile");
+    if (!xuid_tree && !title_profile_tree) {
       continue;
     }
 
