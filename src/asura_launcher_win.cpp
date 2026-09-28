@@ -209,6 +209,8 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--input_backend=", "--user_language=", "--user_country=",
+      "--save_data_root=", "--user_profile_name=", "--user_profile_xuid=",
+      "--asura_auto_first_save_prompt=",
   };
   std::erase_if(args, [](const std::string& arg) {
     for (const auto prefix : prefixes) {
@@ -255,6 +257,21 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_string("input_backend", s.input_backend == 1 ? "xinput" : "sdl");
   add_int("user_language", s.language);
   add_int("user_country", s.country);
+
+  // T04 runtime adapter. These values are owned by Theseus; ReXGlue only
+  // consumes them while the guest still speaks the Xbox XAM ABI.
+  auto& platform = theseus::Platform::Instance();
+  if (!platform.initialized()) {
+    platform.BootstrapFromProcess();
+  }
+  const auto& profile = platform.saves().profile();
+  const auto save_u8 = platform.paths().saves.u8string();
+  add_string("save_data_root",
+             std::string(reinterpret_cast<const char*>(save_u8.data()),
+                         save_u8.size()));
+  add_string("user_profile_name", profile.name);
+  add_string("user_profile_xuid", std::to_string(profile.xuid));
+  add_bool("asura_auto_first_save_prompt", true);
 }
 
 HWND CreateLabel(HWND parent, HFONT font, const wchar_t* text,
