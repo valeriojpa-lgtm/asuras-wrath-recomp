@@ -371,7 +371,7 @@ new_patch_lookup = """  // Search for an XEX patch only while loading a normal m
   if (!xex_module()->is_patch()) {
     patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
     if (!patch_entry) {
-      patch_entry = kernel_state_->file_system()->ResolvePath("update:\\default.xexp");
+      patch_entry = kernel_state_->file_system()->ResolvePath("update:\\\\default.xexp");
     }
   }
   if (patch_entry) {
