@@ -122,6 +122,17 @@ bool NativeSaveSystem::IsFirstRun(const NativeFileSystem& files) const {
         return false;
       }
     }
+
+    // Asura may create title-profile/options data before a SavedGame package.
+    // Treat that as an initialized game profile too, matching the actual
+    // first-run behavior observed on the validated T04 build.
+    if (it->path().filename() == "profile") {
+      std::error_code child_ec;
+      if (std::filesystem::directory_iterator(it->path(), child_ec) !=
+          std::filesystem::directory_iterator()) {
+        return false;
+      }
+    }
   }
 
   return true;
