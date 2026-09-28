@@ -20,10 +20,16 @@ add_compile_options(
     -DREXGLUE_PROFILE_GUEST_FUNCTIONS
 )
 
+# ReXGlue's x86 byte-swap paths use SSSE3 _mm_shuffle_epi8 directly.
+# Keep that modest baseline, but do not require AVX2/FMA for the portable build.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  add_compile_options(-mssse3)
+endif()
+
 option(ASURA_REQUIRE_AVX2
        "Build the x86-64 executable with an AVX2/FMA CPU requirement" OFF)
 if(ASURA_REQUIRE_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-  add_compile_options(-mssse3 -mavx2 -mfma)
+  add_compile_options(-mavx2 -mfma)
 endif()
 
 if(NOT REXSDK_DIR)
