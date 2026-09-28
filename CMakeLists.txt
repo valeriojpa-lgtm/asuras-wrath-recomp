@@ -65,6 +65,7 @@ endif()
 # dependencies so individual services can migrate to native PC backends.
 list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_platform.cpp
+  src/platform/theseus_config.cpp
 )
 
 if(WIN32 AND NOT ANDROID)
