@@ -61,6 +61,12 @@ else()
   )
 endif()
 
+# Theseus host platform boundary. This file must stay free of direct ReXGlue
+# dependencies so individual services can migrate to native PC backends.
+list(APPEND ASURAWRATH_SOURCES
+  src/platform/theseus_platform.cpp
+)
+
 if(WIN32 AND NOT ANDROID)
   enable_language(RC)
   list(APPEND ASURAWRATH_SOURCES
