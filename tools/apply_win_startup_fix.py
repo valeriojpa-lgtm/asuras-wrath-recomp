@@ -112,3 +112,114 @@ new_resolve = """bool VirtualFileSystem::ResolveSymbolicLink(const std::string_v
 
 patch_once(vfs, old_find, new_find, "VFS longest-prefix lookup")
 patch_once(vfs, old_resolve, new_resolve, "VFS longest-prefix resolution")
+
+
+# 3) ReXApp logging: OnConfigurePaths may redirect user_data_root (Asura does
+# this for portable UserData), but SetupEnvironment kept using the pre-hook
+# user_dir when choosing the default log directory. Synchronize it after the
+# hook so logs follow the resolved user-data path too.
+rex_app = Path("tools/rexglue/src/ui/rex_app.cpp")
+
+old_user_dir_sync = """  PathConfig path_config{game_dir,  user_dir,     update_dir,
+                         cache_dir, metadata_dir, exe_dir / (std::string(GetName()) + ".toml")};
+  OnConfigurePaths(path_config);
+  game_data_root_ = path_config.game_data_root;"""
+
+new_user_dir_sync = """  PathConfig path_config{game_dir,  user_dir,     update_dir,
+                         cache_dir, metadata_dir, exe_dir / (std::string(GetName()) + ".toml")};
+  OnConfigurePaths(path_config);
+  // OnConfigurePaths may redirect user data (for example to a portable folder).
+  // Keep the local logging default in sync with the resolved path.
+  user_dir = path_config.user_data_root;
+  game_data_root_ = path_config.game_data_root;"""
+
+patch_once(rex_app, old_user_dir_sync, new_user_dir_sync,
+           "Portable UserData logging path")
+
+
+# 4) VFS device selection and opens: specific nested mounts must beat the
+# generic Partition1 mount, and an aliased directory itself must be resolvable
+# even when OpenFile would otherwise split the path into parent + child.
+old_device_lookup = """  // Find the device.
+  auto it = std::find_if(devices_.cbegin(), devices_.cend(), [&](const auto& d) {
+    return rex::string::utf8_starts_with_case(normalized_path, d->mount_path());
+  });
+  if (it == devices_.cend()) {"""
+
+new_device_lookup = """  // Find the most specific device. Multiple mounts may overlap (for example
+  // Partition1, BCGame and BCGame\\CookedXbox360), so longest-prefix wins.
+  auto it = devices_.cend();
+  size_t best_mount_length = 0;
+  for (auto candidate = devices_.cbegin(); candidate != devices_.cend(); ++candidate) {
+    const auto& mount_path = (*candidate)->mount_path();
+    if (mount_path.size() > best_mount_length &&
+        rex::string::utf8_starts_with_case(normalized_path, mount_path)) {
+      it = candidate;
+      best_mount_length = mount_path.size();
+    }
+  }
+  if (it == devices_.cend()) {"""
+
+patch_once(vfs, old_device_lookup, new_device_lookup,
+           "VFS longest-prefix device selection")
+
+old_open_lookup = """  // Lookup host device/parent path.
+  // If no device or parent, fail.
+  Entry* parent_entry = nullptr;
+  Entry* entry = nullptr;
+
+  auto base_path = rex::string::utf8_find_base_guest_path(path);
+  if (!base_path.empty()) {
+    parent_entry = !root_entry ? ResolvePath(base_path) : root_entry->ResolvePath(base_path);
+    if (!parent_entry) {
+      *out_action = FileAction::kDoesNotExist;
+      return X_STATUS_NO_SUCH_FILE;
+    }
+
+    auto file_name = rex::string::utf8_find_name_from_guest_path(path);
+    entry = parent_entry->GetChild(file_name);
+  } else {
+    entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
+  }"""
+
+new_open_lookup = """  // Lookup host device/parent path.
+  // First resolve the complete path so nested VFS mounts can represent a
+  // directory that doesn't physically exist in the generic parent device.
+  Entry* parent_entry = nullptr;
+  Entry* entry = nullptr;
+
+  if (!root_entry) {
+    entry = ResolvePath(path);
+  } else {
+    const bool looks_absolute =
+        path.find(':') != std::string_view::npos ||
+        rex::string::utf8_starts_with(path, "\\\\");
+    if (!looks_absolute) {
+      auto rooted_path =
+          rex::string::utf8_join_guest_paths(root_entry->absolute_path(), path);
+      entry = ResolvePath(rooted_path);
+    }
+  }
+  if (entry) {
+    parent_entry = entry->parent();
+  }
+
+  if (!entry) {
+    auto base_path = rex::string::utf8_find_base_guest_path(path);
+    if (!base_path.empty()) {
+      parent_entry = !root_entry ? ResolvePath(base_path)
+                                 : root_entry->ResolvePath(base_path);
+      if (!parent_entry) {
+        *out_action = FileAction::kDoesNotExist;
+        return X_STATUS_NO_SUCH_FILE;
+      }
+
+      auto file_name = rex::string::utf8_find_name_from_guest_path(path);
+      entry = parent_entry->GetChild(file_name);
+    } else {
+      entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
+    }
+  }"""
+
+patch_once(vfs, old_open_lookup, new_open_lookup,
+           "VFS full-path and relative mounted opens")

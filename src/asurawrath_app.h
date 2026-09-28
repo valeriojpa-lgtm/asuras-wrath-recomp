@@ -179,20 +179,46 @@ public:
     const auto content_dir = data_root / "Game" / "Content";
     const auto cinematics_dir = data_root / "Game" / "Cinematics";
 
-    // Build a tiny compatibility view for the BCGame root. Unreal Engine 3
-    // opens D:\\BCGame\\ itself and reads Xbox360TOC.txt from there before
-    // touching CookedXbox360 or Movies. Keep that guest layout intact without
-    // forcing the PC-facing data folders back to their Xbox 360 names.
     std::error_code ec;
+    const bool has_content = std::filesystem::is_directory(content_dir, ec);
+    ec.clear();
+    const bool has_cinematics =
+        std::filesystem::is_directory(cinematics_dir, ec);
+
+    // Legacy/extracted layouts do not need the PC compatibility mounts.
+    if (!has_content && !has_cinematics) {
+      return;
+    }
+
+    // UE3 expects a BCGame root containing Xbox360TOC.txt, CookedXbox360 and
+    // Movies. Keep that guest view while storing the real data under clean PC
+    // names. The lightweight compatibility root only contains the TOC and
+    // placeholder directory names; the heavy directories are mounted directly
+    // below their original guest paths.
     const auto compat_bcgame = user_data_root() / "vfs" / "BCGame";
+    ec.clear();
     std::filesystem::create_directories(compat_bcgame / "CookedXbox360", ec);
     ec.clear();
     std::filesystem::create_directories(compat_bcgame / "Movies", ec);
 
-    const auto toc_source = data_root / "Xbox360TOC.txt";
+    const std::filesystem::path toc_candidates[] = {
+        data_root / "Game" / "Xbox360TOC.txt",
+        data_root / "Xbox360TOC.txt",
+        data_root / "BCGame" / "Xbox360TOC.txt",
+        data_root.parent_path() / "BCGame" / "Xbox360TOC.txt",
+    };
+
+    std::filesystem::path toc_source;
+    for (const auto &candidate : toc_candidates) {
+      ec.clear();
+      if (std::filesystem::is_regular_file(candidate, ec)) {
+        toc_source = candidate;
+        break;
+      }
+    }
+
     const auto toc_compat = compat_bcgame / "Xbox360TOC.txt";
-    ec.clear();
-    if (std::filesystem::is_regular_file(toc_source, ec)) {
+    if (!toc_source.empty()) {
       ec.clear();
       std::filesystem::copy_file(
           toc_source, toc_compat,
@@ -200,54 +226,48 @@ public:
       if (ec) {
         REXLOG_ERROR("Failed to mirror Xbox360TOC.txt into compatibility VFS: {}",
                      ec.message());
+      } else {
+        REXLOG_INFO("Xbox360TOC compatibility source: {}",
+                    toc_source.string());
       }
     } else {
-      REXLOG_WARN("Xbox360TOC.txt not found at {}", toc_source.string());
+      REXLOG_WARN(
+          "Xbox360TOC.txt was not found in Data/Game, Data, or legacy BCGame");
     }
 
-    auto register_alias = [&](const std::filesystem::path &host_dir,
-                              std::string_view device_path,
-                              std::string_view guest_path) -> bool {
-      std::error_code alias_ec;
-      if (!std::filesystem::is_directory(host_dir, alias_ec)) {
-        REXLOG_ERROR("PC data alias source directory missing: {}",
+    auto register_mount = [&](const std::filesystem::path &host_dir,
+                              std::string_view guest_mount) -> bool {
+      std::error_code mount_ec;
+      if (!std::filesystem::is_directory(host_dir, mount_ec)) {
+        REXLOG_ERROR("PC data mount source directory missing: {}",
                      host_dir.string());
         return false;
       }
 
       auto device = std::make_unique<rex::filesystem::HostPathDevice>(
-          device_path, host_dir, true);
+          guest_mount, host_dir, true);
       if (!device->Initialize()) {
-        REXLOG_ERROR("Failed to initialize PC data alias device {} -> {}",
-                     device_path, host_dir.string());
+        REXLOG_ERROR("Failed to initialize PC data mount {} -> {}",
+                     guest_mount, host_dir.string());
         return false;
       }
       if (!vfs->RegisterDevice(std::move(device))) {
-        REXLOG_ERROR("Failed to register PC data alias device {}", device_path);
-        return false;
-      }
-      if (!vfs->RegisterSymbolicLink(guest_path, device_path)) {
-        REXLOG_ERROR("Failed to register PC data alias {} -> {}", guest_path,
-                     device_path);
+        REXLOG_ERROR("Failed to register PC data mount {}", guest_mount);
         return false;
       }
 
-      REXLOG_INFO("PC data alias: {} -> {}", guest_path, host_dir.string());
+      REXLOG_INFO("PC data mount: {} -> {}", guest_mount, host_dir.string());
       return true;
     };
 
-    // ReXGlue resolves game: / d: to Partition1 before applying these aliases.
-    // The generic BCGame alias provides the root directory and TOC. The two
-    // longer aliases redirect the heavy data directories to their clean PC
-    // names. The SDK patch selects the longest matching symlink prefix.
-    register_alias(
-        compat_bcgame, "\\Device\\AsuraWrathBCGame",
+    register_mount(
+        compat_bcgame,
         "\\Device\\Harddisk0\\Partition1\\BCGame");
-    register_alias(
-        content_dir, "\\Device\\AsuraWrathContent",
+    register_mount(
+        content_dir,
         "\\Device\\Harddisk0\\Partition1\\BCGame\\CookedXbox360");
-    register_alias(
-        cinematics_dir, "\\Device\\AsuraWrathCinematics",
+    register_mount(
+        cinematics_dir,
         "\\Device\\Harddisk0\\Partition1\\BCGame\\Movies");
   }
 
