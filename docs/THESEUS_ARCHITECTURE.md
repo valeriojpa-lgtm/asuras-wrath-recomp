@@ -183,3 +183,19 @@ T04 selects the first (affirmative) option headlessly and immediately clears
 the condition.
 
 All unrelated message boxes retain their normal UI.
+
+
+## T04.1 first-run polish
+
+The validated T04 build proved native save/profile persistence works, but the
+green XAM message box could appear before SavedGame enumeration armed the
+original one-shot bypass.
+
+T04.1 moves that decision earlier. `NativeSaveSystem::IsFirstRun` checks for
+both SavedGame packages and existing title-profile/options data before the
+runtime starts. The launcher passes that native decision through a temporary
+`asura_first_run` compatibility cvar.
+
+Only a two-button XAM message with the first button focused is eligible for
+automatic confirmation, and the explicit first-run condition is one-shot.
+Normal message boxes remain untouched.
