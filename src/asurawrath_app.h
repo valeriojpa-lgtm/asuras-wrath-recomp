@@ -301,102 +301,27 @@ public:
 
     std::filesystem::create_directories(paths.user_data_root, ec);
     auto cache_dir = paths.user_data_root / "cache";
+    if (paths.user_data_root == theseus::Platform::Instance().paths().user_data) {
+      cache_dir = theseus::Platform::Instance().paths().cache;
+    }
     ec.clear();
     std::filesystem::create_directories(cache_dir, ec);
     paths.cache_root = cache_dir;
 
-    auto resolve_game_dir = [](const std::filesystem::path &dir,
-                               std::filesystem::path &out_path) -> bool {
-      std::error_code ec;
-      if (dir.empty() || !std::filesystem::exists(dir, ec)) {
-        return false;
-      }
-      if (std::filesystem::is_regular_file(dir, ec)) {
-        auto ext = dir.extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".iso" || ext == ".gdfx") {
-          out_path = dir;
-          return true;
-        }
-      }
-      if (std::filesystem::exists(dir / "default.xex", ec)) {
-        out_path = dir;
-        return true;
-      }
-      if (std::filesystem::exists(dir / "Data" / "default.xex", ec)) {
-        out_path = dir / "Data";
-        return true;
-      }
-      if (std::filesystem::exists(dir / "BCGame" / "default.xex", ec)) {
-        out_path = dir / "BCGame";
-        return true;
-      }
-      if (std::filesystem::exists(dir / "extracted", ec)) {
-        auto extracted_dir = dir / "extracted";
-        if (std::filesystem::exists(extracted_dir / "default.xex", ec)) {
-          out_path = extracted_dir;
-          return true;
-        }
-        if (std::filesystem::exists(extracted_dir / "BCGame" / "default.xex",
-                                    ec)) {
-          out_path = extracted_dir / "BCGame";
-          return true;
-        }
-        std::filesystem::directory_iterator end_it;
-        for (std::filesystem::directory_iterator entry(extracted_dir, ec);
-             entry != end_it && !ec; entry.increment(ec)) {
-          if (entry->is_regular_file(ec)) {
-            auto ext = entry->path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == ".iso" || ext == ".gdfx") {
-              out_path = entry->path();
-              return true;
-            }
-          }
-        }
-        out_path = extracted_dir;
-        return true;
-      }
-      if (std::filesystem::exists(dir / "game_data", ec)) {
-        out_path = dir / "game_data";
-        return true;
-      }
-      std::filesystem::directory_iterator end_it;
-      for (std::filesystem::directory_iterator entry(dir, ec);
-           entry != end_it && !ec; entry.increment(ec)) {
-        if (entry->is_regular_file(ec)) {
-          auto ext = entry->path().extension().string();
-          std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-          if (ext == ".iso" || ext == ".gdfx") {
-            out_path = entry->path();
-            return true;
-          }
-        }
-      }
-      return false;
-    };
-
-    std::filesystem::path resolved;
-    if (!paths.game_data_root.empty() &&
-        resolve_game_dir(paths.game_data_root, resolved)) {
-      paths.game_data_root = resolved;
-    } else {
-      auto cwd = std::filesystem::current_path(ec);
-      const std::filesystem::path search_dirs[] = {
-          paths.user_data_root, paths.user_data_root.parent_path(), cwd};
-
-      for (const auto &dir : search_dirs) {
-        if (resolve_game_dir(dir, resolved)) {
-          paths.game_data_root = resolved;
-          break;
-        }
-      }
+    auto &host = theseus::Platform::Instance();
+    if (!host.initialized()) {
+      host.Bootstrap(rex::filesystem::GetExecutableFolder());
     }
 
     auto cwd = std::filesystem::current_path(ec);
-    if (paths.game_data_root.empty()) {
-      paths.game_data_root =
-          paths.user_data_root.empty() ? cwd : paths.user_data_root;
+    if (auto resolved =
+            host.ResolveGameDataRoot(paths.game_data_root, cwd)) {
+      paths.game_data_root = *resolved;
+    } else if (paths.game_data_root.empty()) {
+      // Keep a deterministic portable fallback. A missing default.xex will
+      // still be reported by the existing runtime validation, but path
+      // ownership no longer falls back to Documents/AppData.
+      paths.game_data_root = host.paths().data;
     }
 
     if (std::filesystem::is_regular_file(paths.game_data_root, ec)) {
