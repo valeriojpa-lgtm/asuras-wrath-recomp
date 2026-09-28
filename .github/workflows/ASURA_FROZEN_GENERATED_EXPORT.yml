@@ -1,0 +1,42 @@
+name: ASURA Frozen Generated Export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_FROZEN_GENERATED_EXPORT.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reassemble and verify frozen generated checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cat tu01/ASURA_TU01_GENERATED.zip.part01 \
+              tu01/ASURA_TU01_GENERATED.zip.part02 \
+              > out/ASURA_TU01_GENERATED_FROZEN.zip
+          expected="29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+          actual="$(sha256sum out/ASURA_TU01_GENERATED_FROZEN.zip | awk '{print $1}')"
+          echo "SHA-256: $actual"
+          test "$actual" = "$expected"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_TU01_GENERATED_FROZEN
+          path: out/ASURA_TU01_GENERATED_FROZEN.zip
+          if-no-files-found: error
+          retention-days: 7
