@@ -364,12 +364,15 @@ old_patch_lookup = """  // Search for sibling XEX patch file
 
     REXSYS_DEBUG("Loading XEX patch from {}", patch_path);"""
 
-new_patch_lookup = """  // Search for sibling XEX patch file first. Recompiled preservation
-  // projects may keep the retail XEX immutable and place an update-derived
-  // XEXP under the separately-mounted update: device instead.
-  auto patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
-  if (!patch_entry) {
-    patch_entry = kernel_state_->file_system()->ResolvePath("update:\\\\default.xexp");
+new_patch_lookup = """  // Search for an XEX patch only while loading a normal module.
+  // An XEXP is itself a patch module. If a patch module falls back to
+  // update:\\default.xexp it resolves itself and recursively reloads forever.
+  rex::filesystem::Entry* patch_entry = nullptr;
+  if (!xex_module()->is_patch()) {
+    patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
+    if (!patch_entry) {
+      patch_entry = kernel_state_->file_system()->ResolvePath("update:\\default.xexp");
+    }
   }
   if (patch_entry) {
     auto patch_path = patch_entry->absolute_path();
