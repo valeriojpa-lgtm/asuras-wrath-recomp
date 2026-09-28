@@ -525,3 +525,240 @@ new_discover = "namespace {\n\nsize_t conservativeIndirectCallScan(CodegenContex
 
 patch_once(phase_discover, old_discover, new_discover,
            "conservative proven indirect-call discovery")
+
+
+# 11) Conservative pointer-table discovery without MSVC RTTI.
+# ReXGlue's VTableScanner requires a Complete Object Locator and .?AV/.?AU
+# type descriptors. Xenon/UE3 pointer tables can legitimately omit that RTTI.
+# This secondary pass does NOT register arbitrary code-looking dwords:
+#   - table run must contain >=3 consecutive aligned executable pointers;
+#   - at least 2 sibling slots must already be known functions/imports;
+#   - candidate must lie in an uncovered gap (not inside an existing function);
+#   - candidate bytes must prove a tiny thunk:
+#       b known_target
+#       or addi r3,r3,imm ; b known_target
+# Everything else is diagnostic-only.
+pointer_include_anchor = """#include <unordered_set>"""
+pointer_include_replacement = """#include <unordered_set>
+#include <vector>"""
+patch_once(phase_discover, pointer_include_anchor, pointer_include_replacement,
+           "pointer-table scanner vector include")
+
+pointer_helper_anchor = """}  // anonymous namespace
+
+namespace phases {
+
+VoidResult Discover(CodegenContext& ctx, ProgressReporter* reporter) {"""
+
+pointer_helper_replacement = r"""bool IsKnownCallable(const FunctionGraph& graph, uint32_t address) {
+  return graph.getFunction(address) != nullptr || graph.isImport(address);
+}
+
+bool IsProvenTinyThunk(CodegenContext& ctx, uint32_t address,
+                       uint32_t* outTailTarget) {
+  auto& graph = ctx.graph;
+  auto& decoded = ctx.decoded();
+
+  const auto* first = decoded.get(address);
+  if (!first || isInvalid(*first)) {
+    return false;
+  }
+
+  // Pure non-linking veneer: b known_target.
+  if (first->opcode == Opcode::b && first->branch_target &&
+      IsKnownCallable(graph, *first->branch_target)) {
+    if (outTailTarget) {
+      *outTailTarget = *first->branch_target;
+    }
+    return true;
+  }
+
+  // C++ this-adjustor thunk seen throughout Asura:
+  //   addi r3,r3,imm
+  //   b    known_target
+  if (first->opcode != Opcode::addi ||
+      first->D.RT != 3 || first->D.RA != 3) {
+    return false;
+  }
+
+  const auto* second = decoded.get(address + 4);
+  if (!second || second->opcode != Opcode::b ||
+      !second->branch_target ||
+      !IsKnownCallable(graph, *second->branch_target)) {
+    return false;
+  }
+
+  if (outTailTarget) {
+    *outTailTarget = *second->branch_target;
+  }
+  return true;
+}
+
+size_t conservativePointerTableScan(CodegenContext& ctx) {
+  if (!ctx.hasDecoded()) {
+    return 0;
+  }
+
+  auto& graph = ctx.graph;
+  auto& binary = ctx.binary();
+  auto& decoded = ctx.decoded();
+
+  size_t proven = 0;
+  size_t highConfidence = 0;
+  size_t tables = 0;
+  size_t rejected = 0;
+
+  auto plausiblePointer = [&](uint32_t value) {
+    if ((value & 3u) != 0 ||
+        binary.isInImportExportRange(value) ||
+        !decoded.isInCodeRegion(value)) {
+      return false;
+    }
+    const auto* insn = decoded.get(value);
+    return insn && !isInvalid(*insn);
+  };
+
+  for (const auto& section : binary.sections()) {
+    if (section.executable || !section.data || section.size < 12) {
+      continue;
+    }
+
+    struct Slot {
+      uint32_t slotAddress;
+      uint32_t target;
+    };
+    std::vector<Slot> run;
+
+    auto flushRun = [&]() {
+      if (run.size() < 3) {
+        run.clear();
+        return;
+      }
+
+      size_t knownSiblings = 0;
+      for (const auto& slot : run) {
+        if (IsKnownCallable(graph, slot.target)) {
+          ++knownSiblings;
+        }
+      }
+
+      // Two independent known entries are the minimum evidence that this is a
+      // callable pointer table rather than arbitrary binary data.
+      if (knownSiblings < 2) {
+        run.clear();
+        return;
+      }
+
+      ++tables;
+      for (const auto& slot : run) {
+        const uint32_t target = slot.target;
+        if (IsKnownCallable(graph, target)) {
+          continue;
+        }
+
+        // A pointer into the middle of a known function may be a secondary
+        // entrypoint, but adding overlapping functions automatically is not
+        // conservative enough. Report it only.
+        if (graph.getFunctionContaining(target)) {
+          ++highConfidence;
+          REXCODEGEN_DEBUG(
+              "conservativePointerTableScan: HIGH_CONFIDENCE overlapping "
+              "target 0x{:08X} from table slot 0x{:08X}; not auto-adding",
+              target, slot.slotAddress);
+          continue;
+        }
+
+        uint32_t tailTarget = 0;
+        if (!IsProvenTinyThunk(ctx, target, &tailTarget)) {
+          ++highConfidence;
+          REXCODEGEN_DEBUG(
+              "conservativePointerTableScan: HIGH_CONFIDENCE unknown code "
+              "target 0x{:08X} from table slot 0x{:08X}; thunk shape not "
+              "proven, not auto-adding",
+              target, slot.slotAddress);
+          continue;
+        }
+
+        graph.addFunction(target, 4, FunctionAuthority::VTABLE, true);
+        ++proven;
+        REXCODEGEN_DEBUG(
+            "conservativePointerTableScan: PROVEN tiny thunk 0x{:08X} -> "
+            "0x{:08X} from table slot 0x{:08X} ({} slots, {} known siblings)",
+            target, tailTarget, slot.slotAddress, run.size(), knownSiblings);
+      }
+
+      run.clear();
+    };
+
+    const uint32_t sectionEnd = section.baseAddress + section.size;
+    for (uint32_t slotAddress = section.baseAddress;
+         slotAddress + 4 <= sectionEnd; slotAddress += 4) {
+      const uint8_t* host = section.translate(slotAddress);
+      if (!host) {
+        flushRun();
+        continue;
+      }
+      const uint32_t value = load_and_swap<uint32_t>(host);
+      if (!plausiblePointer(value)) {
+        flushRun();
+        continue;
+      }
+      run.push_back({slotAddress, value});
+    }
+    flushRun();
+  }
+
+  REXCODEGEN_TRACE(
+      "conservativePointerTableScan: {} pointer tables, {} PROVEN added, "
+      "{} HIGH_CONFIDENCE reported, {} rejected",
+      tables, proven, highConfidence, rejected);
+  return proven;
+}
+
+}  // anonymous namespace
+
+namespace phases {
+
+VoidResult Discover(CodegenContext& ctx, ProgressReporter* reporter) {"""
+
+patch_once(phase_discover, pointer_helper_anchor, pointer_helper_replacement,
+           "conservative non-RTTI pointer-table discovery")
+
+pointer_call_anchor = """  if (conservativeIndirectCallScan(ctx) > 0) {
+    size_t iteration = 0;
+    constexpr size_t kMaxIndirectIterations = 8;
+    while (iteration++ < kMaxIndirectIterations) {
+      auto knownFunctions = buildKnownFunctions(ctx.graph);
+      if (discoverPendingFunctions(ctx, knownFunctions) == 0) {
+        break;
+      }
+    }
+  }
+
+  return Ok();"""
+
+pointer_call_replacement = """  size_t newIndirectTargets = conservativeIndirectCallScan(ctx);
+  size_t newPointerTargets = conservativePointerTableScan(ctx);
+
+  if (newIndirectTargets + newPointerTargets > 0) {
+    size_t iteration = 0;
+    constexpr size_t kMaxIndirectIterations = 8;
+    while (iteration++ < kMaxIndirectIterations) {
+      auto knownFunctions = buildKnownFunctions(ctx.graph);
+      if (discoverPendingFunctions(ctx, knownFunctions) == 0) {
+        break;
+      }
+
+      // Newly discovered functions can make another pointer-table candidate
+      // provable. Re-scan to a small fixed point without widening the rules.
+      newPointerTargets = conservativePointerTableScan(ctx);
+      if (newPointerTargets == 0 && ctx.graph.getPendingFunctions().empty()) {
+        break;
+      }
+    }
+  }
+
+  return Ok();"""
+
+patch_once(phase_discover, pointer_call_anchor, pointer_call_replacement,
+           "run conservative pointer-table discovery")
