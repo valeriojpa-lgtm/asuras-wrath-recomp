@@ -9,6 +9,7 @@ on:
       - ".github/workflows/TU01_Native_Build.yml"
 
 # Verification trigger: runtime XEXP recursion guard
+# Verification trigger: missing-entrypoint PPC dump
 permissions:
   contents: read
 
