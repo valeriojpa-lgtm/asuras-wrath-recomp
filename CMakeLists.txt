@@ -5,10 +5,12 @@ project(asura_wrath_recomp LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Keep optimization configuration-aware and preserve guest floating-point
+# semantics. The upstream template forced -O3/-ffast-math and AVX2/FMA even
+# for Debug builds; none of those ISA extensions are required by ReXGlue.
 add_compile_options(
-    -O3
-    -ffast-math
-    -funroll-loops
+    $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Release>:-funroll-loops>
     -Wno-nan-infinity-disabled
     -Wno-c++98-compat
     -Wno-c++98-compat-pedantic
@@ -18,7 +20,9 @@ add_compile_options(
     -DREXGLUE_PROFILE_GUEST_FUNCTIONS
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+option(ASURA_REQUIRE_AVX2
+       "Build the x86-64 executable with an AVX2/FMA CPU requirement" OFF)
+if(ASURA_REQUIRE_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   add_compile_options(-mssse3 -mavx2 -mfma)
 endif()
 
