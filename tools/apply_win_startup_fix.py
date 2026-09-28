@@ -554,6 +554,34 @@ pointer_helper_replacement = r"""bool IsKnownCallable(FunctionGraph& graph, uint
   return graph.getFunction(address) != nullptr || graph.isImport(address);
 }
 
+bool IsStrongFunctionBoundary(CodegenContext& ctx, uint32_t address) {
+  if (address < 4 || !ctx.hasDecoded()) {
+    return false;
+  }
+
+  const auto* previous = ctx.decoded().get(address - 4);
+  if (!previous) {
+    return false;
+  }
+
+  if (previous->raw == 0) {
+    return true;
+  }
+
+  if (previous->is_return() ||
+      previous->opcode == Opcode::b ||
+      previous->opcode == Opcode::ba) {
+    return true;
+  }
+
+  if (previous->opcode == Opcode::bcctr &&
+      previous->raw == 0x4E800420u) {
+    return true;
+  }
+
+  return false;
+}
+
 bool IsProvenTinyThunk(CodegenContext& ctx, uint32_t address,
                        uint32_t* outTailTarget) {
   auto& graph = ctx.graph;
@@ -669,22 +697,38 @@ size_t conservativePointerTableScan(CodegenContext& ctx) {
         }
 
         uint32_t tailTarget = 0;
-        if (!IsProvenTinyThunk(ctx, target, &tailTarget)) {
-          ++highConfidence;
+        if (IsProvenTinyThunk(ctx, target, &tailTarget)) {
+          graph.addFunction(target, 4, FunctionAuthority::VTABLE, true);
+          ++proven;
           REXCODEGEN_DEBUG(
-              "conservativePointerTableScan: HIGH_CONFIDENCE unknown code "
-              "target 0x{:08X} from table slot 0x{:08X}; thunk shape not "
-              "proven, not auto-adding",
-              target, slot.slotAddress);
+              "conservativePointerTableScan: PROVEN tiny thunk 0x{:08X} -> "
+              "0x{:08X} from table slot 0x{:08X} ({} slots, {} known siblings)",
+              target, tailTarget, slot.slotAddress, run.size(), knownSiblings);
           continue;
         }
 
-        graph.addFunction(target, 4, FunctionAuthority::VTABLE, true);
-        ++proven;
+        const bool strongTable =
+            run.size() >= 8 &&
+            knownSiblings >= 4 &&
+            knownSiblings * 2 >= run.size();
+
+        if (strongTable && IsStrongFunctionBoundary(ctx, target)) {
+          graph.addFunction(target, 4, FunctionAuthority::VTABLE, true);
+          ++proven;
+          REXCODEGEN_DEBUG(
+              "conservativePointerTableScan: PROVEN RTTI-less method "
+              "0x{:08X} from table slot 0x{:08X} "
+              "({} slots, {} known siblings, strong entry boundary)",
+              target, slot.slotAddress, run.size(), knownSiblings);
+          continue;
+        }
+
+        ++highConfidence;
         REXCODEGEN_DEBUG(
-            "conservativePointerTableScan: PROVEN tiny thunk 0x{:08X} -> "
-            "0x{:08X} from table slot 0x{:08X} ({} slots, {} known siblings)",
-            target, tailTarget, slot.slotAddress, run.size(), knownSiblings);
+            "conservativePointerTableScan: HIGH_CONFIDENCE unknown code "
+            "target 0x{:08X} from table slot 0x{:08X}; insufficient "
+            "table/boundary proof, not auto-adding",
+            target, slot.slotAddress);
       }
 
       run.clear();
