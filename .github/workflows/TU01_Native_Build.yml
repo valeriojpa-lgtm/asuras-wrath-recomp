@@ -2,6 +2,11 @@ name: TU01 - Native Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/TU01_Native_Build.yml"
 
 permissions:
   contents: read
