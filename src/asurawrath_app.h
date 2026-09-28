@@ -6,8 +6,12 @@
 #include <rex/filesystem/devices/disc_image_device.h>
 #include <rex/filesystem/devices/disc_image_entry.h>
 #include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/stfs_container_device.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xam/content_manager.h>
+#include <unordered_set>
 
 #if defined(__ANDROID__)
 #include <SDL3/SDL.h>
@@ -271,8 +275,112 @@ public:
         "\\Device\\Harddisk0\\Partition1\\BCGame\\Movies");
   }
 
+#if defined(ASURA_DLC_LAB_AUTOINSTALL)
+  void InstallDlcLabContent() {
+    constexpr uint32_t kAsuraTitleId = 0x43430817;
+
+    auto *rt = runtime();
+    if (!rt || !rt->kernel_state()) {
+      REXLOG_ERROR("DLC lab: runtime/kernel state unavailable");
+      return;
+    }
+
+    auto *kernel = rt->kernel_state();
+    auto *content = kernel->content_manager();
+    if (!content) {
+      REXLOG_ERROR("DLC lab: ContentManager unavailable");
+      return;
+    }
+
+    const auto dlc_dir = game_data_root() / "DLC";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dlc_dir, ec)) {
+      REXLOG_INFO("DLC lab: no Data/DLC directory found; skipping");
+      return;
+    }
+
+    std::unordered_set<std::string> installed;
+    for (const auto &item :
+         content->ListContent(0, 0,
+                              rex::system::XContentType::kMarketplaceContent,
+                              kAsuraTitleId)) {
+      installed.insert(item.file_name());
+    }
+
+    size_t accepted = 0;
+    size_t skipped = 0;
+    size_t installed_now = 0;
+
+    for (const auto &entry : std::filesystem::directory_iterator(dlc_dir, ec)) {
+      if (ec || !entry.is_regular_file(ec)) {
+        continue;
+      }
+
+      const auto &package_path = entry.path();
+      const auto package_name = package_path.filename().string();
+
+      auto header =
+          rex::filesystem::StfsContainerDevice::ReadPackageHeader(package_path);
+      if (!header) {
+        REXLOG_WARN("DLC lab: skipping non-STFS file {}", package_name);
+        ++skipped;
+        continue;
+      }
+
+      const uint32_t title_id =
+          uint32_t(header->metadata.execution_info.title_id);
+      const uint32_t content_type =
+          uint32_t(header->metadata.content_type);
+
+      if (title_id != kAsuraTitleId) {
+        REXLOG_WARN(
+            "DLC lab: rejecting {} (Title ID {:08X}, expected {:08X})",
+            package_name, title_id, kAsuraTitleId);
+        ++skipped;
+        continue;
+      }
+
+      if (content_type !=
+          uint32_t(rex::system::XContentType::kMarketplaceContent)) {
+        REXLOG_WARN(
+            "DLC lab: rejecting {} (content type {:08X}, expected 00000002)",
+            package_name, content_type);
+        ++skipped;
+        continue;
+      }
+
+      ++accepted;
+
+      if (installed.contains(package_name)) {
+        REXLOG_INFO("DLC lab: already installed, skipping {}", package_name);
+        continue;
+      }
+
+      const auto result = content->InstallContent(package_path);
+      if (XSUCCEEDED(result)) {
+        installed.insert(package_name);
+        ++installed_now;
+        const auto display_name = header->metadata.display_name(
+            rex::system::XLanguage::kEnglish);
+        REXLOG_INFO("DLC lab: installed {} ({})", package_name,
+                    rex::to_string(display_name));
+      } else {
+        REXLOG_ERROR("DLC lab: failed to install {} (result {:08X})",
+                     package_name, uint32_t(result));
+      }
+    }
+
+    REXLOG_INFO(
+        "DLC lab: scan complete - accepted {}, newly installed {}, rejected {}",
+        accepted, installed_now, skipped);
+  }
+#endif
+
   void OnPostSetup() override {
     SetupPcDataLayoutAliases();
+#if defined(ASURA_DLC_LAB_AUTOINSTALL)
+    InstallDlcLabContent();
+#endif
 #if defined(__ANDROID__)
     SetupVirtualGamepad();
 #endif
