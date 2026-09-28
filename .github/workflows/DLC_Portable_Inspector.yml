@@ -1,0 +1,58 @@
+name: DLC Lab - Portable Inspector
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout DLC lab
+        uses: actions/checkout@v4
+        with:
+          ref: dlc-lab
+          fetch-depth: 1
+
+      - name: Configure portable inspector
+        shell: cmd
+        run: |
+          cmake -S tools\dlc_inspector_portable -B out\dlc-inspector -A x64
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Build portable inspector
+        shell: cmd
+        run: |
+          cmake --build out\dlc-inspector --config Release --target ASURA_DLC_Inspector
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Package
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path out\dlc-portable | Out-Null
+          Copy-Item out\dlc-inspector\Release\ASURA_DLC_Inspector.exe out\dlc-portable\
+          @"
+          ASURA'S WRATH - DLC INSPECTOR (PORTABLE)
+
+          No Python, no installer, no external runtime required.
+
+          Usage:
+          - Drag the folder containing the five DLC packages onto ASURA_DLC_Inspector.exe
+          - Or place the EXE beside a Data\DLC folder and double-click it.
+
+          Outputs:
+          - DLC_REPORT.json
+          - DLC_REPORT.csv
+
+          The tool is read-only. It does not extract, install or modify DLC.
+          "@ | Set-Content -Encoding UTF8 out\dlc-portable\README.txt
+
+      - name: Upload portable inspector
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_DLC_INSPECTOR_PORTABLE
+          path: out/dlc-portable/*
+          if-no-files-found: error
+          retention-days: 30
