@@ -159,11 +159,48 @@ def main() -> int:
     definitions: set[str] = set()
     direct_calls: set[str] = set()
     indirect_literals: list[int] = []
+    generated_text_by_file: dict[str, str] = {}
+    trap_surface = {
+        "unresolved_call": [],
+        "unresolved_bctr": [],
+        "unimplemented_insn": [],
+        "empty_stub": [],
+        "null_jump_case": [],
+    }
+
+    fatal_markers = {
+        "unresolved_call": (
+            'REX_FATAL("Unresolved call from',
+            "// ERROR: unresolved bl target",
+        ),
+        "unresolved_bctr": (
+            "unresolved at bctr",
+            "classified as function but not in graph at bctr",
+        ),
+        "unimplemented_insn": (
+            "REX_UNIMPLEMENTED(",
+        ),
+        "empty_stub": (
+            "// STUB: Function at",
+        ),
+        "null_jump_case": (
+            "__builtin_trap(); // ERROR - detected jump to null value",
+        ),
+    }
+
     for p in partitions:
         t = read_text(p)
+        generated_text_by_file[p.name] = t
         definitions.update(DEF_RE.findall(t))
         direct_calls.update(DIRECT_CALL_RE.findall(t))
         indirect_literals.extend(parse_int(x) for x in INDIRECT_LITERAL_RE.findall(t))
+        for category, markers in fatal_markers.items():
+            for marker in markers:
+                count = t.count(marker)
+                if count:
+                    trap_surface[category].append(
+                        {"file": p.name, "marker": marker, "count": count}
+                    )
 
     registrations_list = [
         (parse_int(addr), name) for addr, name in REGISTER_RE.findall(register_text)
@@ -360,6 +397,36 @@ def main() -> int:
             f"{len(direct_calls)} unique direct-call symbols resolve to declarations",
         )
 
+
+    proven_traps = {
+        key: value
+        for key, value in trap_surface.items()
+        if key != "null_jump_case" and value
+    }
+    if proven_traps:
+        audit.fail(
+            "generated.runtime-traps",
+            "generated C++ contains deferred fatal/stub surfaces that must be resolved before runtime validation",
+            categories=proven_traps,
+        )
+    else:
+        audit.ok(
+            "generated.runtime-traps",
+            "no unresolved calls, unresolved bctr targets, unimplemented instructions, or empty generated stubs detected",
+        )
+
+    if trap_surface["null_jump_case"]:
+        audit.warn(
+            "generated.null-jump-cases",
+            "jump-table code contains explicit null-target trap cases; these may be unreachable but remain a campaign-readiness risk",
+            occurrences=trap_surface["null_jump_case"],
+        )
+    else:
+        audit.ok(
+            "generated.null-jump-cases",
+            "no explicit null-target jump-table trap cases detected",
+        )
+
     # Frozen TU01 map invariants: old retail starts must stay out, TU starts stay in.
     funcs_toml_path = root / "includes" / "funcs.toml"
     if funcs_toml_path.is_file():
@@ -491,8 +558,6 @@ def main() -> int:
 
     # Build a lightweight generated-source index so historical runtime targets
     # can be classified as internal labels when the emitted C++ proves it.
-    generated_text_by_file = {p.name: read_text(p) for p in partitions}
-
     for addr in sorted(KNOWN_REVIEW_TARGETS):
         if addr in registrations:
             audit.candidate(
@@ -586,6 +651,10 @@ def main() -> int:
         "mapping_count": len(mappings),
         "direct_call_symbol_count": len(direct_calls),
         "literal_indirect_target_count": len(set(indirect_literals)),
+        "trap_surface_counts": {
+            key: sum(item["count"] for item in value)
+            for key, value in trap_surface.items()
+        },
         "bounds": bounds,
     }
     write_report(audit, report_path, root, generated, metadata)
