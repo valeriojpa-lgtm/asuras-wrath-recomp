@@ -126,9 +126,12 @@ Platform& Platform::Instance() {
 Platform::Platform() {
   backends_.fill(Backend::kReXGlue);
 
-  // T03: host filesystem ownership moves to Theseus. Guest Xbox path/ABI
-  // translation remains a compatibility bridge until a later milestone.
+  // T03: host filesystem ownership moved to Theseus.
   backends_[static_cast<std::size_t>(Service::kFileSystem)] = Backend::kNative;
+
+  // T04: host save/profile policy is Theseus-owned. Guest XAM calls remain a
+  // compatibility bridge while the recompiled game still speaks the Xbox ABI.
+  backends_[static_cast<std::size_t>(Service::kSaves)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
@@ -180,6 +183,10 @@ bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
   CreateDirectoryBestEffort(paths_.config);
   CreateDirectoryBestEffort(paths_.logs);
   CreateDirectoryBestEffort(paths_.saves);
+
+  if (!saves_.Initialize(paths_.user_data, paths_.saves, files_)) {
+    return false;
+  }
 
   initialized_ = true;
   return true;
