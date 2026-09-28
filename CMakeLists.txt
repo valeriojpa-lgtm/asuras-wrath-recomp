@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 3.25)
 project(asura_wrath_recomp LANGUAGES CXX)
 
+option(ASURA_DLC_LAB_AUTOINSTALL "Enable isolated DLC auto-install laboratory" OFF)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -93,4 +95,8 @@ endif()
 set(REXGLUE_RECOMP_DEBUG_INFO "none" CACHE STRING "Debug info level" FORCE)
 
 rexglue_setup_target(asura_wrath_recomp GPU_PLUGINS xenos)
+
+if(ASURA_DLC_LAB_AUTOINSTALL)
+  target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_DLC_LAB_AUTOINSTALL=1)
+endif()
 target_include_directories(asura_wrath_recomp PRIVATE ${REXSDK_DIR}/thirdparty/imgui ${CMAKE_CURRENT_SOURCE_DIR}/src)
