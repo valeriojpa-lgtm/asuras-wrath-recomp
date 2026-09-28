@@ -1,4 +1,4 @@
-name: RUN 01 - Windows x64 PC Layout
+name: RUN 02 - PC Layout VFS + Portable UserData
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
         run: |
           choco install llvm cmake ninja -y --no-progress
 
-      - name: Apply Windows startup patch
+      - name: Apply ReXGlue startup and VFS patches
         shell: cmd
         run: |
           python tools\apply_win_startup_fix.py
@@ -37,7 +37,7 @@ jobs:
           clang --version
           ninja --version
 
-      - name: Build and package RUN 00
+      - name: Build and package RUN 02
         shell: cmd
         run: |
           cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
@@ -62,15 +62,15 @@ jobs:
           Get-ChildItem -Recurse out\dist
           $zip = Get-ChildItem out\dist\*.zip | Select-Object -First 1
           if (-not $zip) {
-            throw "RUN 00 package ZIP was not created."
+            throw "RUN 02 package ZIP was not created."
           }
           Write-Host "Package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
-      - name: Upload RUN 00 artifact
+      - name: Upload RUN 02 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_PC_LAYOUT
+          name: ASURAS_WRATH_PC_LAYOUT_V2
           path: out/dist/*.zip
           if-no-files-found: error
           retention-days: 30

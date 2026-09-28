@@ -179,11 +179,39 @@ public:
     const auto content_dir = data_root / "Game" / "Content";
     const auto cinematics_dir = data_root / "Game" / "Cinematics";
 
+    // Build a tiny compatibility view for the BCGame root. Unreal Engine 3
+    // opens D:\\BCGame\\ itself and reads Xbox360TOC.txt from there before
+    // touching CookedXbox360 or Movies. Keep that guest layout intact without
+    // forcing the PC-facing data folders back to their Xbox 360 names.
+    std::error_code ec;
+    const auto compat_bcgame = user_data_root() / "vfs" / "BCGame";
+    std::filesystem::create_directories(compat_bcgame / "CookedXbox360", ec);
+    ec.clear();
+    std::filesystem::create_directories(compat_bcgame / "Movies", ec);
+
+    const auto toc_source = data_root / "Xbox360TOC.txt";
+    const auto toc_compat = compat_bcgame / "Xbox360TOC.txt";
+    ec.clear();
+    if (std::filesystem::is_regular_file(toc_source, ec)) {
+      ec.clear();
+      std::filesystem::copy_file(
+          toc_source, toc_compat,
+          std::filesystem::copy_options::overwrite_existing, ec);
+      if (ec) {
+        REXLOG_ERROR("Failed to mirror Xbox360TOC.txt into compatibility VFS: {}",
+                     ec.message());
+      }
+    } else {
+      REXLOG_WARN("Xbox360TOC.txt not found at {}", toc_source.string());
+    }
+
     auto register_alias = [&](const std::filesystem::path &host_dir,
                               std::string_view device_path,
                               std::string_view guest_path) -> bool {
-      std::error_code ec;
-      if (!std::filesystem::is_directory(host_dir, ec)) {
+      std::error_code alias_ec;
+      if (!std::filesystem::is_directory(host_dir, alias_ec)) {
+        REXLOG_ERROR("PC data alias source directory missing: {}",
+                     host_dir.string());
         return false;
       }
 
@@ -208,14 +236,13 @@ public:
       return true;
     };
 
-    // The game still requests the original Xbox 360 paths. Keep those guest
-    // paths intact while presenting a clean PC-facing layout on disk:
-    //
-    //   Data/Game/Content     <-> BCGame/CookedXbox360
-    //   Data/Game/Cinematics  <-> BCGame/Movies
-    //
-    // game: and d: are first resolved by ReXGlue to Partition1, so aliases are
-    // registered against the resolved device paths.
+    // ReXGlue resolves game: / d: to Partition1 before applying these aliases.
+    // The generic BCGame alias provides the root directory and TOC. The two
+    // longer aliases redirect the heavy data directories to their clean PC
+    // names. The SDK patch selects the longest matching symlink prefix.
+    register_alias(
+        compat_bcgame, "\\Device\\AsuraWrathBCGame",
+        "\\Device\\Harddisk0\\Partition1\\BCGame");
     register_alias(
         content_dir, "\\Device\\AsuraWrathContent",
         "\\Device\\Harddisk0\\Partition1\\BCGame\\CookedXbox360");
@@ -233,7 +260,19 @@ public:
 
   void OnConfigurePaths(rex::PathConfig &paths) override {
     std::error_code ec;
+
+#if defined(_WIN32) && !defined(__ANDROID__)
+    // Portable Windows layout by default. An explicit --user_data_root still
+    // wins, which keeps the normal ReXGlue override available for power users.
+    if (REXCVAR_GET(user_data_root).empty()) {
+      paths.user_data_root =
+          rex::filesystem::GetExecutableFolder() / "UserData";
+    }
+#endif
+
+    std::filesystem::create_directories(paths.user_data_root, ec);
     auto cache_dir = paths.user_data_root / "cache";
+    ec.clear();
     std::filesystem::create_directories(cache_dir, ec);
     paths.cache_root = cache_dir;
 
