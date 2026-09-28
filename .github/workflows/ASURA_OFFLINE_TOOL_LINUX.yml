@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake clang lld libgtk-3-dev libasound2-dev libpulse-dev libxss-dev
+          sudo apt-get install -y ninja-build cmake clang lld libgtk-3-dev libasound2-dev libpulse-dev libxss-dev libx11-xcb-dev
 
       - name: Reconstruct verified TU01 generated checkpoint
         shell: bash
