@@ -10,6 +10,7 @@ on:
 
 # Verification trigger: runtime XEXP recursion guard
 # Verification trigger: missing-entrypoint PPC dump
+# Verification trigger: conservative PPC veneer resolver
 permissions:
   contents: read
 
