@@ -1,5 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <filesystem>
+#include <system_error>
+
 #include <rex/cvar.h>
 #include <rex/rex_app.h>
 
