@@ -55,6 +55,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           Copy-Item $exe.FullName (Join-Path $root "Asura's Wrath.exe")
 
+          $runtime = Get-ChildItem -Path out -Recurse -Filter "rexruntime.dll" | Select-Object -First 1
+          $gpu = Get-ChildItem -Path out -Recurse -Filter "rexgpu-xenos.dll" | Select-Object -First 1
+          if (-not $runtime) { throw "rexruntime.dll was not produced." }
+          if (-not $gpu) { throw "rexgpu-xenos.dll was not produced." }
+          Copy-Item $runtime.FullName (Join-Path $root "rexruntime.dll")
+          Copy-Item $gpu.FullName (Join-Path $root "rexgpu-xenos.dll")
+
           New-Item -ItemType Directory -Force -Path (Join-Path $root "Data/DLC") | Out-Null
 
           @"
