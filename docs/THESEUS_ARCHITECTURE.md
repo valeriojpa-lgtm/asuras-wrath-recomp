@@ -1,19 +1,19 @@
 # Asura's Wrath — Theseus PC Port
 
-## T03: Native Filesystem
+## T04: Native Saves + Profile
 
 T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
 portable path discovery and launcher configuration into that boundary. T03
-moves physical PC filesystem ownership into Theseus while retaining one
-explicit guest-path compatibility bridge for the Xbox-shaped ABI still used by
-the recompiled game.
+moved physical PC filesystem ownership into Theseus. T04 moves save/profile
+policy into Theseus while retaining one explicit XAM compatibility bridge for
+the Xbox-shaped ABI still used by the recompiled game.
 
 ### Invariant
 
 The preserved baseline is `frozen/run04-launcher-pass`.
 Development happens only on `theseus/*` branches.
 
-At T03:
+At T04:
 
 ```
 Asura guest logic
@@ -21,11 +21,13 @@ Asura guest logic
 AsurawrathApp
       |
 TheseusPlatform
-  |-- portable paths     [native]
-  |-- config             [native]
-  |-- NativeFileSystem   [native]
+  |-- portable paths       [native]
+  |-- config               [native]
+  |-- NativeFileSystem     [native]
+  |-- NativeSaveSystem     [native]
   |
-  +-- GuestFsBridge      [temporary ReXGlue path/ABI adapter]
+  +-- GuestFsBridge        [temporary ReXGlue path/ABI adapter]
+  +-- XamSaveProfileBridge [temporary ReXGlue save/profile ABI]
       |
 Windows
 ```
@@ -134,3 +136,50 @@ Root/
 T03 does **not** claim that the Xbox guest file ABI has disappeared. That
 removal is a later milestone; T03's achievement is that ordinary PC file I/O
 and ownership no longer belong to ReXGlue.
+
+
+## T04 save/profile boundary
+
+T04 preserves the game's existing Xbox 360 save package format but changes who
+owns the host-side storage policy.
+
+Canonical host layout:
+
+```
+UserData/
+  Saves/
+    TheseusProfile.ini
+    <XUID>/
+      <TitleID>/
+        00000001/
+          <SavedGame packages>
+        Headers/
+          00000001/
+    <TitleID>/
+      profile/
+        <ProfileName>/
+```
+
+The stable compatibility profile initially keeps the same identity used by the
+validated ReXGlue baseline so existing saves can migrate without changing their
+XUID association.
+
+Older layouts are migrated conservatively:
+- 16-hex XUID trees under `UserData` move to `UserData/Saves`.
+- 8-hex title trees are moved only when they contain a `profile` directory.
+- unrelated `UserData` files are never touched.
+- failed moves fall back to copy-first behavior; data safety has priority.
+
+Marketplace/DLC content intentionally remains on the legacy content root in
+T04. Only `SavedGame` packages and title-profile settings use the native Saves
+root, so this milestone does not disturb the later TU/DLC work.
+
+### First-run save prompt
+
+The green XAM-style save-creation dialog is not suppressed globally. The bridge
+arms a one-shot condition only when the game enumerates the `SavedGame`
+content type and receives zero results. If the next dialog has two buttons,
+T04 selects the first (affirmative) option headlessly and immediately clears
+the condition.
+
+All unrelated message boxes retain their normal UI.
