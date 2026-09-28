@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T03 Theseus dependency audit.
+"""T04 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -81,10 +81,21 @@ def main() -> int:
     boundary = "PASS" if platform_refs == 0 else "FAIL"
     filesystem_boundary = "PASS" if fs_refs_outside_bridge == 0 else "FAIL"
 
+    patch_script = read_text(repo / "tools" / "apply_win_startup_fix.py")
+    save_bridge_markers = (
+        "T04 ContentManager native save root",
+        "T04 Theseus profile identity",
+        "T04 auto-confirm first save creation",
+    )
+    missing_save_markers = [
+        marker for marker in save_bridge_markers if marker not in patch_script
+    ]
+    save_bridge_boundary = "PASS" if not missing_save_markers else "FAIL"
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T03-native-filesystem",
+        "Milestone: T04-native-saves-profile",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -98,16 +109,18 @@ def main() -> int:
         f"ReXGlue filesystem isolation: {filesystem_boundary}",
         f"ReXGlue filesystem refs outside compatibility bridge: {fs_refs_outside_bridge}",
         f"ReXGlue filesystem refs inside compatibility bridge: {fs_bridge_refs}",
+        f"Save/profile compatibility bridge: {save_bridge_boundary}",
         "",
-        "Native host facilities (T03):",
+        "Native host facilities (T04):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
+        "  saves/profile  : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
         "  input      : rexglue",
-        "  saves      : rexglue",
+        "  saves      : native host / rexglue XAM bridge",
         "  video      : rexglue",
         "  audio      : rexglue",
         "  timing     : rexglue",
@@ -125,11 +138,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T03 invariant:",
-        "  Physical PC filesystem I/O is Theseus-owned.",
-        "  ReXGlue filesystem usage is isolated to one temporary guest-path bridge.",
-        "  ISO/GDFX import also remains in that compatibility bridge.",
-        "  The bridge is not counted as removed until guest Xbox file ABI is replaced.",
+        "T04 invariant:",
+        "  Physical save/profile policy is Theseus-owned under UserData/Saves.",
+        "  Existing Xbox save package format is preserved for compatibility.",
+        "  ReXGlue remains only as the temporary XAM save/profile ABI bridge.",
+        "  Empty SavedGame enumeration may auto-confirm Asura's one-shot create prompt.",
         "",
     ]
 
@@ -147,6 +160,13 @@ def main() -> int:
             file=sys.stderr,
         )
         return 3
+    if missing_save_markers:
+        print(
+            "ERROR: T04 save/profile bridge markers missing: "
+            + ", ".join(missing_save_markers),
+            file=sys.stderr,
+        )
+        return 4
     return 0
 
 
