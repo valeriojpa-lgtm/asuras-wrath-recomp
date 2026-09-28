@@ -133,6 +133,32 @@ jobs:
               print("OWNER_SOURCE_END")
               break
 
+          thunk_addresses = [
+              0x829C9B18, 0x829C9B20, 0x829C9B28, 0x829C9B30,
+              0x829C9B38, 0x829C9B40, 0x829C9B48, 0x829C9B50,
+              0x829C9B58, 0x829C9B60, 0x829C9B68, 0x829C9B70,
+              0x829C9B78, 0x829C9B88, 0x829C9BA0, 0x829C9BC0,
+          ]
+          all_cpp = {
+              p.name: p.read_text(encoding="utf-8", errors="replace")
+              for p in Path("generated/default").glob("asura_wrath_recomp.*.cpp")
+          }
+          print("THUNK_CLUSTER_BEGIN")
+          for address in thunk_addresses:
+              marker = f"DEFINE_REX_FUNC(sub_{address:08X})"
+              for name, text in all_cpp.items():
+                  pos = text.find(marker)
+                  if pos < 0:
+                      continue
+                  end = text.find("DEFINE_REX_FUNC(", pos + len(marker))
+                  if end < 0:
+                      end = min(len(text), pos + 4000)
+                  body = text[pos:end].strip()
+                  print(f"--- 0x{address:08X} {name} ---")
+                  print(body)
+                  break
+          print("THUNK_CLUSTER_END")
+
       - name: Upload static audit report
         if: always()
         uses: actions/upload-artifact@v4
