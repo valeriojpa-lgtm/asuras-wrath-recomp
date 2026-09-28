@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T02 Theseus dependency audit.
+"""T03 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -18,13 +18,32 @@ REX_PATTERNS = (
     re.compile(r"\bREX[A-Z0-9_]+"),
 )
 
+REX_FILESYSTEM_PATTERNS = (
+    re.compile(r"#\s*include\s*[<\"]rex/filesystem"),
+    re.compile(r"\brex::filesystem::"),
+    re.compile(r"\bHostPathDevice\b"),
+    re.compile(r"\bDiscImageDevice\b"),
+)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def count_patterns(path: Path, patterns) -> int:
+    text = read_text(path)
+    return sum(len(pattern.findall(text)) for pattern in patterns)
+
 
 def count_rex_refs(path: Path) -> int:
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return 0
-    return sum(len(pattern.findall(text)) for pattern in REX_PATTERNS)
+    return count_patterns(path, REX_PATTERNS)
+
+
+def count_rex_filesystem_refs(path: Path) -> int:
+    return count_patterns(path, REX_FILESYSTEM_PATTERNS)
 
 
 def main() -> int:
@@ -35,6 +54,8 @@ def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     src = repo / "src"
     platform = src / "platform"
+    compat_bridge = src / "compat" / "rexglue_filesystem_bridge.cpp"
+    compat_bridge_header = src / "compat" / "rexglue_filesystem_bridge.h"
 
     host_files = sorted(
         p for p in src.rglob("*")
@@ -47,12 +68,23 @@ def main() -> int:
     platform_refs = sum(count_rex_refs(p) for p in platform_files)
     total_refs = sum(n for _, n in counts)
 
+    fs_counts = [(p, count_rex_filesystem_refs(p)) for p in host_files]
+    fs_counts = [(p, n) for p, n in fs_counts if n]
+    allowed_fs_bridge = {compat_bridge, compat_bridge_header}
+    fs_refs_outside_bridge = sum(
+        n for p, n in fs_counts if p not in allowed_fs_bridge
+    )
+    fs_bridge_refs = sum(
+        n for p, n in fs_counts if p in allowed_fs_bridge
+    )
+
     boundary = "PASS" if platform_refs == 0 else "FAIL"
+    filesystem_boundary = "PASS" if fs_refs_outside_bridge == 0 else "FAIL"
 
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T02-native-paths-config",
+        "Milestone: T03-native-filesystem",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -63,13 +95,17 @@ def main() -> int:
         f"Theseus platform boundary: {boundary}",
         f"Direct ReXGlue refs inside src/platform: {platform_refs}",
         f"Direct ReXGlue refs in host-side src: {total_refs}",
+        f"ReXGlue filesystem isolation: {filesystem_boundary}",
+        f"ReXGlue filesystem refs outside compatibility bridge: {fs_refs_outside_bridge}",
+        f"ReXGlue filesystem refs inside compatibility bridge: {fs_bridge_refs}",
         "",
-        "Native host facilities (T02):",
+        "Native host facilities (T03):",
         "  portable paths : native",
         "  config         : native",
+        "  filesystem     : native",
         "",
         "Runtime service backends:",
-        "  filesystem : rexglue",
+        "  filesystem : native host / rexglue guest-path bridge",
         "  input      : rexglue",
         "  saves      : rexglue",
         "  video      : rexglue",
@@ -89,10 +125,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T02 invariant:",
-        "  Portable path discovery and launcher config are Theseus-owned.",
-        "  Runtime filesystem remains ReXGlue-backed until T03.",
-        "  Later milestones replace one backend at a time and keep A/B fallback.",
+        "T03 invariant:",
+        "  Physical PC filesystem I/O is Theseus-owned.",
+        "  ReXGlue filesystem usage is isolated to one temporary guest-path bridge.",
+        "  ISO/GDFX import also remains in that compatibility bridge.",
+        "  The bridge is not counted as removed until guest Xbox file ABI is replaced.",
         "",
     ]
 
@@ -104,6 +141,12 @@ def main() -> int:
     if platform_refs:
         print("ERROR: src/platform must remain ReXGlue-independent.", file=sys.stderr)
         return 2
+    if fs_refs_outside_bridge:
+        print(
+            "ERROR: ReXGlue filesystem references escaped the T03 compatibility bridge.",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 
