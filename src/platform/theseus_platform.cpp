@@ -3,6 +3,18 @@
 #include <algorithm>
 #include <cctype>
 #include <system_error>
+#include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace theseus {
 namespace {
@@ -16,6 +28,35 @@ std::filesystem::path NormalizeRoot(const std::filesystem::path& root) {
 void CreateDirectoryBestEffort(const std::filesystem::path& path) {
   std::error_code ec;
   std::filesystem::create_directories(path, ec);
+}
+
+std::filesystem::path ProcessExecutableFolder() {
+#if defined(_WIN32)
+  std::wstring buffer(32768, L'\0');
+  const DWORD length = GetModuleFileNameW(
+      nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+  if (length && length < buffer.size()) {
+    buffer.resize(length);
+    return std::filesystem::path(buffer).parent_path();
+  }
+#elif defined(__APPLE__)
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  std::vector<char> buffer(size + 1, '\0');
+  if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+    return std::filesystem::path(buffer.data()).parent_path();
+  }
+#else
+  std::vector<char> buffer(4096, '\0');
+  const auto length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+  if (length > 0) {
+    buffer[static_cast<std::size_t>(length)] = '\0';
+    return std::filesystem::path(buffer.data()).parent_path();
+  }
+#endif
+
+  std::error_code ec;
+  return std::filesystem::current_path(ec);
 }
 
 bool IsDiscImage(const std::filesystem::path& path) {
@@ -83,9 +124,11 @@ Platform& Platform::Instance() {
 }
 
 Platform::Platform() {
-  // The defining rule of T01: the boundary exists, but behavior is still the
-  // frozen RUN04 behavior. Services become native one at a time in later runs.
   backends_.fill(Backend::kReXGlue);
+
+  // T03: host filesystem ownership moves to Theseus. Guest Xbox path/ABI
+  // translation remains a compatibility bridge until a later milestone.
+  backends_[static_cast<std::size_t>(Service::kFileSystem)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
@@ -140,6 +183,10 @@ bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
 
   initialized_ = true;
   return true;
+}
+
+bool Platform::BootstrapFromProcess() {
+  return Bootstrap(ProcessExecutableFolder());
 }
 
 std::optional<std::filesystem::path> Platform::ResolveGameDataRoot(
