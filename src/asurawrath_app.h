@@ -329,8 +329,8 @@ public:
 
       const uint32_t title_id =
           uint32_t(header->metadata.execution_info.title_id);
-      const uint32_t content_type =
-          uint32_t(header->metadata.content_type);
+      const auto content_type =
+          static_cast<rex::system::XContentType>(header->metadata.content_type);
 
       if (title_id != kAsuraTitleId) {
         REXLOG_WARN(
@@ -340,11 +340,10 @@ public:
         continue;
       }
 
-      if (content_type !=
-          uint32_t(rex::system::XContentType::kMarketplaceContent)) {
+      if (content_type != rex::system::XContentType::kMarketplaceContent) {
         REXLOG_WARN(
             "DLC lab: rejecting {} (content type {:08X}, expected 00000002)",
-            package_name, content_type);
+            package_name, static_cast<uint32_t>(content_type));
         ++skipped;
         continue;
       }
@@ -360,10 +359,7 @@ public:
       if (XSUCCEEDED(result)) {
         installed.insert(package_name);
         ++installed_now;
-        const auto display_name = header->metadata.display_name(
-            rex::system::XLanguage::kEnglish);
-        REXLOG_INFO("DLC lab: installed {} ({})", package_name,
-                    rex::to_string(display_name));
+        REXLOG_INFO("DLC lab: installed {}", package_name);
       } else {
         REXLOG_ERROR("DLC lab: failed to install {} (result {:08X})",
                      package_name, uint32_t(result));
