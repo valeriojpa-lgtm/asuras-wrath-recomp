@@ -16,6 +16,8 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/system.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xmodule.h>
 
 #if defined(__ANDROID__)
 #include <SDL3/SDL.h>
@@ -557,7 +559,34 @@ public:
       return false;
     }
 #endif
-    return rex::ReXApp::ConstructRuntime(paths);
+    if (!rex::ReXApp::ConstructRuntime(paths)) {
+      return false;
+    }
+
+#if defined(_WIN32) && !defined(__ANDROID__)
+    constexpr uint32_t kExpectedTu01EntryPoint = 0x82B75160;
+    auto *rt = runtime();
+    auto executable =
+        rt && rt->kernel_state() ? rt->kernel_state()->GetExecutableModule()
+                                : rex::system::object_ref<rex::system::UserModule>();
+    auto *processor = executable ? executable->processor_module() : nullptr;
+    const uint32_t loaded_entry = processor ? processor->entry_point() : 0;
+
+    if (loaded_entry != kExpectedTu01EntryPoint) {
+      const std::string msg = fmt::format(
+          "TU01 image verification failed.\n\n"
+          "Loaded entrypoint: 0x{:08X}\n"
+          "Expected TU01 entrypoint: 0x{:08X}\n\n"
+          "The game will not start with a retail/TU01 hybrid image.",
+          loaded_entry, kExpectedTu01EntryPoint);
+      REXLOG_ERROR("{}", msg);
+      rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+      return false;
+    }
+
+    REXLOG_INFO("TU01 image verified: entrypoint {:08X}", loaded_entry);
+#endif
+    return true;
   }
 
   void OnConfigurePaths(rex::PathConfig &paths) override {
