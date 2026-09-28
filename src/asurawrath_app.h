@@ -1,13 +1,21 @@
 #pragma once
 
+#include <array>
+#include <cstring>
 #include <fstream>
+#include <span>
+#include <vector>
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/disc_image_device.h>
 #include <rex/filesystem/devices/disc_image_entry.h>
 #include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/stfs_container_device.h>
+#include <rex/filesystem/entry.h>
+#include <rex/filesystem/file.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/system.h>
 
 #if defined(__ANDROID__)
 #include <SDL3/SDL.h>
@@ -93,6 +101,264 @@ bool ExtractIsoToDirectory(const std::filesystem::path &iso_path,
     REXLOG_INFO("Successfully extracted ISO to {}", dest_dir.string());
   }
   return success;
+}
+
+// --------------------------------------------------------------------------
+// TU01 runtime image preparation.
+//
+// TU01 generated C++ must run against a TU01-patched guest image. ReXGlue
+// already knows how to apply a sibling .xexp to a .xex. For preservation we
+// keep the base XEX untouched and derive Data/Update/default.xexp from the
+// user's original TU STFS package. A small ReXGlue VFS patch makes update:
+// the fallback location for this XEXP.
+// --------------------------------------------------------------------------
+constexpr uint32_t kAsuraTitleId = 0x43430817;
+constexpr size_t kTu01XexpSize = 573440;
+constexpr uint32_t kTu01SourceVersion = 0x00000005;
+constexpr uint32_t kTu01TargetVersion = 0x00000105;
+constexpr std::array<uint8_t, 20> kTu01DigestSource = {
+    0x09, 0x2B, 0xD0, 0x39, 0xE8, 0xD0, 0xD9, 0xF8, 0x68, 0xD4,
+    0x8F, 0xE8, 0x8C, 0x0A, 0x68, 0x54, 0x07, 0xAD, 0xD8, 0x01};
+
+uint32_t ReadBe32(const uint8_t *p) {
+  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+         (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+}
+
+bool ReadHostFile(const std::filesystem::path &path,
+                  std::vector<uint8_t> &out) {
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(path, ec);
+  if (ec || size == 0 || size > (16ull * 1024ull * 1024ull)) {
+    return false;
+  }
+  out.resize(static_cast<size_t>(size));
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    out.clear();
+    return false;
+  }
+  in.read(reinterpret_cast<char *>(out.data()),
+          static_cast<std::streamsize>(out.size()));
+  if (!in || static_cast<size_t>(in.gcount()) != out.size()) {
+    out.clear();
+    return false;
+  }
+  return true;
+}
+
+bool ValidateTu01Xexp(std::span<const uint8_t> bytes) {
+  if (bytes.size() != kTu01XexpSize || bytes.size() < 0x40) {
+    return false;
+  }
+  if (std::memcmp(bytes.data(), "XEX2", 4) != 0) {
+    return false;
+  }
+
+  const uint32_t header_count = ReadBe32(bytes.data() + 0x14);
+  if (header_count > 128 ||
+      0x18ull + uint64_t(header_count) * 8ull > bytes.size()) {
+    return false;
+  }
+
+  constexpr uint32_t kDeltaPatchDescriptor = 0x000005FF;
+  for (uint32_t i = 0; i < header_count; ++i) {
+    const size_t opt = 0x18 + size_t(i) * 8;
+    if (ReadBe32(bytes.data() + opt) != kDeltaPatchDescriptor) {
+      continue;
+    }
+
+    const uint32_t desc = ReadBe32(bytes.data() + opt + 4);
+    if (uint64_t(desc) + 0x4C > bytes.size()) {
+      return false;
+    }
+
+    const uint32_t target_version = ReadBe32(bytes.data() + desc + 0x04);
+    const uint32_t source_version = ReadBe32(bytes.data() + desc + 0x08);
+    if (target_version != kTu01TargetVersion ||
+        source_version != kTu01SourceVersion) {
+      return false;
+    }
+
+    return std::memcmp(bytes.data() + desc + 0x0C,
+                       kTu01DigestSource.data(),
+                       kTu01DigestSource.size()) == 0;
+  }
+  return false;
+}
+
+rex::filesystem::Entry *
+FindEntryNamed(rex::filesystem::Entry *entry, std::string_view wanted) {
+  if (!entry) {
+    return nullptr;
+  }
+
+  auto ascii_equal_ci = [](std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+      auto ca = static_cast<unsigned char>(a[i]);
+      auto cb = static_cast<unsigned char>(b[i]);
+      if (ca >= 'A' && ca <= 'Z') ca = static_cast<unsigned char>(ca + 32);
+      if (cb >= 'A' && cb <= 'Z') cb = static_cast<unsigned char>(cb + 32);
+      if (ca != cb) return false;
+    }
+    return true;
+  };
+
+  if (ascii_equal_ci(entry->name(), wanted)) {
+    return entry;
+  }
+  for (const auto &child : entry->children()) {
+    if (auto *found = FindEntryNamed(child.get(), wanted)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+bool ExtractTu01Xexp(const std::filesystem::path &package_path,
+                     std::vector<uint8_t> &xexp) {
+  auto header =
+      rex::filesystem::StfsContainerDevice::ReadPackageHeader(package_path);
+  if (!header ||
+      static_cast<uint32_t>(header->metadata.execution_info.title_id) !=
+          kAsuraTitleId) {
+    return false;
+  }
+
+  rex::filesystem::StfsContainerDevice device("tu:", package_path);
+  if (!device.Initialize()) {
+    return false;
+  }
+
+  auto *root = device.ResolvePath("");
+  auto *entry = FindEntryNamed(root, "default.xexp");
+  if (!entry || entry->size() != kTu01XexpSize) {
+    return false;
+  }
+
+  rex::filesystem::File *file = nullptr;
+  const auto status =
+      entry->Open(rex::filesystem::FileAccess::kGenericRead, &file);
+  if (XFAILED(status) || !file) {
+    return false;
+  }
+
+  xexp.resize(entry->size());
+  size_t bytes_read = 0;
+  const auto read_status =
+      file->ReadSync(std::span<uint8_t>(xexp), 0, &bytes_read);
+  file->Destroy();
+
+  if (XFAILED(read_status) || bytes_read != xexp.size()) {
+    xexp.clear();
+    return false;
+  }
+  return ValidateTu01Xexp(xexp);
+}
+
+bool WriteTu01XexpAtomically(const std::filesystem::path &target,
+                             std::span<const uint8_t> bytes) {
+  std::error_code ec;
+  std::filesystem::create_directories(target.parent_path(), ec);
+  if (ec) {
+    return false;
+  }
+
+  auto temp = target;
+  temp += ".tmp";
+  {
+    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      return false;
+    }
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    out.close();
+    if (!out.good()) {
+      std::filesystem::remove(temp, ec);
+      return false;
+    }
+  }
+
+  // update/default.xexp is a derived cache file, never the preserved base XEX.
+  if (std::filesystem::exists(target, ec)) {
+    auto rejected = target;
+    rejected += ".rejected";
+    std::filesystem::remove(rejected, ec);
+    ec.clear();
+    std::filesystem::rename(target, rejected, ec);
+    if (ec) {
+      std::filesystem::remove(temp, ec);
+      return false;
+    }
+  }
+
+  ec.clear();
+  std::filesystem::rename(temp, target, ec);
+  if (ec) {
+    std::filesystem::remove(temp, ec);
+    return false;
+  }
+  return true;
+}
+
+bool PrepareTu01RuntimePatch(const std::filesystem::path &update_dir) {
+  std::error_code ec;
+  std::filesystem::create_directories(update_dir, ec);
+  if (ec) {
+    REXLOG_ERROR("TU01: cannot create update directory {}: {}",
+                 update_dir.string(), ec.message());
+    return false;
+  }
+
+  const auto target = update_dir / "default.xexp";
+  std::vector<uint8_t> existing;
+  if (ReadHostFile(target, existing) && ValidateTu01Xexp(existing)) {
+    REXLOG_INFO(
+        "TU01 runtime patch ready: {} (0.0.0.5 -> 0.0.1.5)",
+        target.string());
+    return true;
+  }
+
+  if (std::filesystem::exists(target, ec)) {
+    REXLOG_WARN("TU01: existing default.xexp is not the verified TU01 patch");
+  }
+
+  for (const auto &item : std::filesystem::directory_iterator(update_dir, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!item.is_regular_file(ec) || item.path() == target) {
+      continue;
+    }
+
+    std::vector<uint8_t> xexp;
+    if (!ExtractTu01Xexp(item.path(), xexp)) {
+      continue;
+    }
+
+    if (!WriteTu01XexpAtomically(target, xexp)) {
+      REXLOG_ERROR("TU01: failed to write verified runtime XEXP to {}",
+                   target.string());
+      return false;
+    }
+
+    REXLOG_INFO("TU01: extracted verified default.xexp from {}",
+                item.path().filename().string());
+    REXLOG_INFO(
+        "TU01 runtime patch ready: {} (0.0.0.5 -> 0.0.1.5)",
+        target.string());
+    return true;
+  }
+
+  REXLOG_ERROR(
+      "TU01 runtime patch missing. Put the original Asura's Wrath TU01 STFS "
+      "package in {}. The TU01 recomp will not boot against a retail image.",
+      update_dir.string());
+  return false;
 }
 } // namespace
 
@@ -278,6 +544,22 @@ public:
 #endif
   }
 
+  bool ConstructRuntime(const rex::PathConfig &paths) override {
+#if defined(_WIN32) && !defined(__ANDROID__)
+    if (!PrepareTu01RuntimePatch(paths.update_data_root)) {
+      const std::string msg =
+          "TU01 runtime patch is missing or invalid.\n\n"
+          "Put your original Asura's Wrath TU01 package in Data\\Update and "
+          "start the game again.\n\n"
+          "The preserved default.xex is never modified.";
+      REXLOG_ERROR("{}", msg);
+      rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+      return false;
+    }
+#endif
+    return rex::ReXApp::ConstructRuntime(paths);
+  }
+
   void OnConfigurePaths(rex::PathConfig &paths) override {
     std::error_code ec;
 
@@ -287,6 +569,10 @@ public:
     if (REXCVAR_GET(user_data_root).empty()) {
       paths.user_data_root =
           rex::filesystem::GetExecutableFolder() / "UserData";
+    }
+    if (REXCVAR_GET(update_data_root).empty()) {
+      paths.update_data_root =
+          rex::filesystem::GetExecutableFolder() / "Data" / "Update";
     }
 #endif
 
