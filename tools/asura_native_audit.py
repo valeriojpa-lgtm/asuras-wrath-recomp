@@ -281,16 +281,33 @@ def main() -> int:
         )
 
     missing_reg_for_def = sorted(definitions - set(name_to_addr))
-    if missing_reg_for_def:
+    unexpected_unregistered_defs = []
+    direct_only_defs = []
+    for name in missing_reg_for_def:
+        m = HEX_FUNC_RE.match(name)
+        if m and code_base is not None:
+            addr = int(m.group(1), 16)
+            if addr >= code_base:
+                unexpected_unregistered_defs.append(name)
+            else:
+                direct_only_defs.append(name)
+        else:
+            # ReXGlue intentionally omits some named helpers below code_base
+            # from PPCFuncMappings while still emitting bodies for direct calls.
+            # Without an address-bearing name we cannot prove a table omission.
+            direct_only_defs.append(name)
+
+    if unexpected_unregistered_defs:
         audit.fail(
             "generated.definition-registration",
-            "generated definitions without dispatcher registration",
-            names=missing_reg_for_def[:128],
+            "generated in-range definitions missing dispatcher registration",
+            names=unexpected_unregistered_defs[:128],
         )
     else:
         audit.ok(
             "generated.definition-registration",
-            "every generated definition is registered",
+            "no provably in-range generated definition is missing registration",
+            direct_only_count=len(direct_only_defs),
         )
 
     # Registrations without a generated body are legal only for explicit runtime
