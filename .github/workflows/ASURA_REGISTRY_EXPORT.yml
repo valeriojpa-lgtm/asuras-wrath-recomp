@@ -1,0 +1,59 @@
+name: ASURA Registry Export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_REGISTRY_EXPORT.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reconstruct frozen generated checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/ASURA_TU01_GENERATED.zip"
+          cat tu01/ASURA_TU01_GENERATED.zip.part01 tu01/ASURA_TU01_GENERATED.zip.part02 > "$payload"
+          test "$(sha256sum "$payload" | awk '{print $1}')" = "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+          python3 - "$payload" out <<'PY'
+          import pathlib,re,sys,zipfile
+          archive=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          out.mkdir(parents=True,exist_ok=True)
+          wanted={"asura_wrath_register.cpp","asura_wrath_init.cpp"}
+          blobs={}
+          with zipfile.ZipFile(archive) as z:
+              for info in z.infolist():
+                  name=info.filename.replace("\\","/").split("/")[-1]
+                  if name in wanted:
+                      blobs[name]=z.read(info).decode("utf-8","replace")
+          reg=blobs.get("asura_wrath_register.cpp","")
+          init=blobs.get("asura_wrath_init.cpp","")
+          text=reg+"\n"+init
+          pairs={}
+          for m in re.finditer(r"(?:SetFunction\(|\{\s*)(0x[0-9A-Fa-f]+|\d+)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",text):
+              addr=int(m.group(1),0)
+              pairs[addr]=m.group(2)
+          p=out/"registered_addresses.txt"
+          p.write_text("".join(f"0x{a:08X} {pairs[a]}\n" for a in sorted(pairs)),encoding="utf-8")
+          print("registered:",len(pairs))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_TU01_REGISTRY
+          path: out/registered_addresses.txt
+          if-no-files-found: error
+          retention-days: 7
