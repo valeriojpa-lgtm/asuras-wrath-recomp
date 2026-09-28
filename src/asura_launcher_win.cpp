@@ -9,6 +9,8 @@
 
 #include "asura_launcher_win.h"
 #include "resource.h"
+#include "platform/theseus_config.h"
+#include "platform/theseus_platform.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -81,20 +83,7 @@ struct AdapterOption {
   bool software = false;
 };
 
-struct LauncherSettings {
-  int width = 1280;
-  int height = 720;
-  bool fullscreen = true;
-  int renderer = 0;       // 0 D3D12, 1 Vulkan
-  int adapter = -1;       // -1 = highest dedicated-memory DXGI adapter
-  bool vsync = false;
-  bool async_shaders = false;
-  bool mnk = true;
-  int input_backend = 0;  // 0 SDL, 1 XInput
-  int language = 1;
-  int country = 103;
-  bool show_at_startup = true;
-};
+using LauncherSettings = theseus::Config;
 
 std::filesystem::path ExecutableFolder() {
   std::wstring buffer(32768, L'\0');
@@ -108,10 +97,13 @@ std::filesystem::path ExecutableFolder() {
 }
 
 std::filesystem::path ConfigPath() {
-  auto user_data = ExecutableFolder() / "UserData";
-  std::error_code ec;
-  std::filesystem::create_directories(user_data, ec);
-  return user_data / "Launcher.ini";
+  auto& platform = theseus::Platform::Instance();
+  platform.Bootstrap(ExecutableFolder());
+  return platform.paths().config / "Asura.ini";
+}
+
+std::filesystem::path LegacyConfigPath() {
+  return ExecutableFolder() / "UserData" / "Launcher.ini";
 }
 
 std::vector<AdapterOption> EnumerateAdapters() {
@@ -188,55 +180,15 @@ LauncherSettings DefaultSettings() {
   return s;
 }
 
-int ReadInt(const std::filesystem::path& path, const wchar_t* key, int fallback) {
-  return static_cast<int>(GetPrivateProfileIntW(
-      L"Settings", key, fallback, path.c_str()));
-}
-
-bool ReadBool(const std::filesystem::path& path, const wchar_t* key, bool fallback) {
-  return ReadInt(path, key, fallback ? 1 : 0) != 0;
-}
-
 LauncherSettings LoadSettings(const std::filesystem::path& path) {
-  LauncherSettings s = DefaultSettings();
-  s.width = ReadInt(path, L"Width", s.width);
-  s.height = ReadInt(path, L"Height", s.height);
-  s.fullscreen = ReadBool(path, L"Fullscreen", s.fullscreen);
-  s.renderer = ReadInt(path, L"Renderer", s.renderer);
-  s.adapter = ReadInt(path, L"Adapter", s.adapter);
-  s.vsync = ReadBool(path, L"VSync", s.vsync);
-  s.async_shaders = ReadBool(path, L"AsyncShaders", s.async_shaders);
-  s.mnk = ReadBool(path, L"KeyboardMouse", s.mnk);
-  s.input_backend = ReadInt(path, L"InputBackend", s.input_backend);
-  s.language = ReadInt(path, L"Language", s.language);
-  s.country = ReadInt(path, L"Country", s.country);
-  s.show_at_startup = ReadBool(path, L"ShowAtStartup", s.show_at_startup);
-  return s;
+  LauncherSettings settings = DefaultSettings();
+  (void)theseus::LoadConfig(path, settings);
+  return settings;
 }
 
-void WriteInt(const std::filesystem::path& path, const wchar_t* key, int value) {
-  wchar_t buffer[32]{};
-  _snwprintf_s(buffer, _countof(buffer), _TRUNCATE, L"%d", value);
-  WritePrivateProfileStringW(L"Settings", key, buffer, path.c_str());
-}
-
-void WriteBool(const std::filesystem::path& path, const wchar_t* key, bool value) {
-  WritePrivateProfileStringW(L"Settings", key, value ? L"1" : L"0", path.c_str());
-}
-
-void SaveSettings(const std::filesystem::path& path, const LauncherSettings& s) {
-  WriteInt(path, L"Width", s.width);
-  WriteInt(path, L"Height", s.height);
-  WriteBool(path, L"Fullscreen", s.fullscreen);
-  WriteInt(path, L"Renderer", s.renderer);
-  WriteInt(path, L"Adapter", s.adapter);
-  WriteBool(path, L"VSync", s.vsync);
-  WriteBool(path, L"AsyncShaders", s.async_shaders);
-  WriteBool(path, L"KeyboardMouse", s.mnk);
-  WriteInt(path, L"InputBackend", s.input_backend);
-  WriteInt(path, L"Language", s.language);
-  WriteInt(path, L"Country", s.country);
-  WriteBool(path, L"ShowAtStartup", s.show_at_startup);
+void SaveSettings(const std::filesystem::path& path,
+                  const LauncherSettings& settings) {
+  (void)theseus::SaveConfig(path, settings);
 }
 
 bool HasArg(const std::vector<std::string>& args, std::string_view wanted) {
@@ -671,8 +623,19 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
   state.config_path = ConfigPath();
   state.adapters = EnumerateAdapters();
 
-  const bool has_config = std::filesystem::exists(state.config_path);
-  state.settings = has_config ? LoadSettings(state.config_path) : DefaultSettings();
+  bool has_config = std::filesystem::exists(state.config_path);
+  if (has_config) {
+    state.settings = LoadSettings(state.config_path);
+  } else {
+    const auto legacy_path = LegacyConfigPath();
+    if (std::filesystem::exists(legacy_path)) {
+      state.settings = LoadSettings(legacy_path);
+      SaveSettings(state.config_path, state.settings);
+      has_config = true;
+    } else {
+      state.settings = DefaultSettings();
+    }
+  }
 
   const bool should_show =
       !force_hide && (force_show || !has_config || state.settings.show_at_startup);
