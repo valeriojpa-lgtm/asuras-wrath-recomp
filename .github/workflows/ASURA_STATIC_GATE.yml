@@ -1,0 +1,97 @@
+name: ASURA Static Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_STATIC_GATE.yml"
+      - "CMakeLists.txt"
+      - "includes/**"
+      - "src/**"
+      - "tools/asura_native_audit.py"
+      - "tu01/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asura-static-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: TU01 generated integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository without submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reconstruct verified TU01 generated checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/ASURA_TU01_GENERATED.zip"
+          cat             tu01/ASURA_TU01_GENERATED.zip.part01             tu01/ASURA_TU01_GENERATED.zip.part02             > "$payload"
+
+          expected="29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+          actual="$(sha256sum "$payload" | awk '{print $1}')"
+          echo "TU01 generated checkpoint SHA-256: $actual"
+          test "$actual" = "$expected"
+
+          stage="$RUNNER_TEMP/asura-tu01-generated"
+          rm -rf "$stage" generated/default
+          mkdir -p "$stage"
+          unzip -q "$payload" -d "$stage"
+          test -d "$stage/generated/default"
+          mkdir -p generated
+          cp -a "$stage/generated/default" generated/default
+
+          count="$(find generated/default -maxdepth 1 -name 'asura_wrath_recomp.*.cpp' | wc -l)"
+          echo "Generated partitions: $count"
+          test "$count" -eq 207
+
+      - name: Run static native audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/asura_native_audit.py             --report out/audit/asura_native_audit.json
+
+      - name: Summarize high-value findings
+        if: always()
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          p = Path("out/audit/asura_native_audit.json")
+          if not p.exists():
+              print("Audit report was not produced.")
+              raise SystemExit(0)
+
+          data = json.loads(p.read_text(encoding="utf-8"))
+          print("Result:", data.get("result"))
+          print("Trap surface:", data.get("metadata", {}).get("trap_surface_counts", {}))
+
+          candidates = data.get("indirect_candidates", {})
+          for bucket in ("PROVEN", "HIGH_CONFIDENCE", "REVIEW", "REJECT"):
+              rows = candidates.get(bucket, [])
+              print(f"{bucket}: {len(rows)}")
+              for row in rows:
+                  if row.get("address") == "0x829C9BD0":
+                      print("  0x829C9BD0:", json.dumps(row, indent=2))
+
+      - name: Upload static audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_STATIC_AUDIT_REPORT
+          path: out/audit/asura_native_audit.json
+          if-no-files-found: warn
+          retention-days: 30
