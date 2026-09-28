@@ -54,11 +54,19 @@ if(ANDROID)
   set(ASURAWRATH_SOURCES
     src/main.cpp
     src/jni_input.cpp
-)
+  )
 else()
   set(ASURAWRATH_SOURCES
     src/main.cpp
-)
+  )
+endif()
+
+if(WIN32 AND NOT ANDROID)
+  enable_language(RC)
+  list(APPEND ASURAWRATH_SOURCES
+    src/asura_launcher_win.cpp
+    src/asura_windows.rc
+  )
 endif()
 
 if(ANDROID)
@@ -76,6 +84,8 @@ endif()
 
 if(WIN32 AND NOT ANDROID)
   set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "Asura's Wrath")
+  target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_NATIVE_LAUNCHER=1)
+  target_link_libraries(asura_wrath_recomp PRIVATE dxgi comctl32)
 else()
   set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "asura_wrath_recomp")
 endif()

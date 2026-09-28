@@ -223,3 +223,129 @@ new_open_lookup = """  // Lookup host device/parent path.
 
 patch_once(vfs, old_open_lookup, new_open_lookup,
            "VFS full-path and relative mounted opens")
+
+
+# 5) Native Asura launcher: run the project-owned Win32 settings dialog before
+# cvar::Init so graphics, input and language startup options are active before
+# ReXGlue creates the runtime.
+windowed_main = Path("tools/rexglue/src/ui/windowed_app_main_sdl.cpp")
+
+old_launcher_include = """#include <rex/platform.h>
+#include <rex/ui/windowed_app.h>"""
+
+new_launcher_include = """#include <rex/platform.h>
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)
+#include "asura_launcher_win.h"
+#endif
+#include <rex/ui/windowed_app.h>"""
+
+patch_once(windowed_main, old_launcher_include, new_launcher_include,
+           "Native launcher include")
+
+old_main_entry = """int main(int argc, char* argv[]) {
+  return RunWindowedApp(argc, argv);
+}"""
+
+new_main_entry = """int main(int argc, char* argv[]) {
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)
+  std::vector<std::string> args;
+  args.reserve(static_cast<size_t>(argc));
+  for (int i = 0; i < argc; ++i) {
+    args.emplace_back(argv[i] ? argv[i] : "");
+  }
+  if (!asura::RunNativeLauncher(args)) {
+    return EXIT_SUCCESS;
+  }
+  std::vector<char*> argv_ptrs;
+  argv_ptrs.reserve(args.size());
+  for (auto& arg : args) {
+    argv_ptrs.push_back(arg.data());
+  }
+  return RunWindowedApp(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
+#else
+  return RunWindowedApp(argc, argv);
+#endif
+}"""
+
+patch_once(windowed_main, old_main_entry, new_main_entry,
+           "Native launcher console entry")
+
+old_wmain_launch = """  auto utf8_args = WideArgsToUtf8(wargc, wargv);
+  LocalFree(wargv);
+
+  std::vector<char*> argv_ptrs;"""
+
+new_wmain_launch = """  auto utf8_args = WideArgsToUtf8(wargc, wargv);
+  LocalFree(wargv);
+
+#if defined(ASURA_NATIVE_LAUNCHER)
+  if (!asura::RunNativeLauncher(utf8_args)) {
+    return EXIT_SUCCESS;
+  }
+#endif
+
+  std::vector<char*> argv_ptrs;"""
+
+patch_once(windowed_main, old_wmain_launch, new_wmain_launch,
+           "Native launcher Windows entry")
+
+
+# 6) Asura queries the Xbox 360 language through XGetLanguage. ReXGlue's
+# implementation currently hard-codes English even though user_language is an
+# existing cvar. Make XGetLanguage honor that cvar so the native launcher can
+# select the game's language before boot.
+xam_info = Path("tools/rexglue/src/kernel/xam/xam_info.cpp")
+
+old_xam_cvar_include = """#include <rex/kernel/xam/module.h>
+#include <rex/kernel/xam/private.h>"""
+
+new_xam_cvar_include = """#include <rex/cvar.h>
+#include <rex/kernel/xam/module.h>
+#include <rex/kernel/xam/private.h>"""
+
+patch_once(xam_info, old_xam_cvar_include, new_xam_cvar_include,
+           "XGetLanguage cvar include")
+
+old_xam_namespace = """namespace rex {
+namespace kernel {
+namespace xam {"""
+
+new_xam_namespace = """REXCVAR_DECLARE(uint32_t, user_language);
+
+namespace rex {
+namespace kernel {
+namespace xam {"""
+
+patch_once(xam_info, old_xam_namespace, new_xam_namespace,
+           "XGetLanguage user_language declaration")
+
+old_xgetlanguage = """u32 XGetLanguage_entry() {
+  auto desired_language = XLanguage::kEnglish;
+
+  // Switch the language based on game region.
+  // TODO(benvanik): pull from xex header.
+  uint32_t game_region = XEX_REGION_NTSCU;
+  if (game_region & XEX_REGION_NTSCU) {
+    desired_language = XLanguage::kEnglish;
+  } else if (game_region & XEX_REGION_NTSCJ) {
+    desired_language = XLanguage::kJapanese;
+  }
+  // Add more overrides?
+
+  return uint32_t(desired_language);
+}"""
+
+new_xgetlanguage = """u32 XGetLanguage_entry() {
+  uint32_t desired_language = REXCVAR_GET(user_language);
+  // Xbox 360 dashboard language IDs used by XGetLanguage. ReXGlue's
+  // user_language defaults to English (1); keep that as the fallback for
+  // invalid / unsupported values.
+  if (desired_language < 1 || desired_language > 17 || desired_language == 10) {
+    desired_language = uint32_t(XLanguage::kEnglish);
+  }
+  REXKRNL_IMPORT_RESULT("XGetLanguage", "{}", desired_language);
+  return desired_language;
+}"""
+
+patch_once(xam_info, old_xgetlanguage, new_xgetlanguage,
+           "XGetLanguage user language support")

@@ -1,0 +1,4 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_ASURA_ICON ICON "../resources/asura.ico"
