@@ -1,0 +1,128 @@
+name: ASURA ReXGlue CLI Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_REXGLUE_CLI_LINUX.yml"
+      - "tools/apply_win_startup_fix.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asura-rexglue-cli-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build cmake g++ gcc lld \
+            libgtk-3-dev libasound2-dev libpulse-dev \
+            libxss-dev libx11-xcb-dev
+
+      - name: Reconstruct verified frozen generated checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/ASURA_TU01_GENERATED.zip"
+          cat tu01/ASURA_TU01_GENERATED.zip.part01 \
+              tu01/ASURA_TU01_GENERATED.zip.part02 > "$payload"
+          test "$(sha256sum "$payload" | awk '{print $1}')" = \
+            "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+
+          stage="$RUNNER_TEMP/generated"
+          rm -rf "$stage" generated/default
+          mkdir -p "$stage"
+          python3 - "$payload" "$stage" <<'PY'
+          import pathlib,sys,zipfile
+          archive=pathlib.Path(sys.argv[1]); root=pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(archive) as z:
+              for info in z.infolist():
+                  rel=pathlib.PurePosixPath(info.filename.replace("\\","/"))
+                  if rel.is_absolute() or ".." in rel.parts:
+                      raise SystemExit("unsafe ZIP member")
+                  target=root.joinpath(*rel.parts)
+                  if info.is_dir():
+                      target.mkdir(parents=True,exist_ok=True)
+                  else:
+                      target.parent.mkdir(parents=True,exist_ok=True)
+                      with z.open(info) as src, target.open("wb") as dst:
+                          dst.write(src.read())
+          PY
+          mkdir -p generated
+          cp -a "$stage/generated/default" generated/default
+
+      - name: Apply project ReXGlue patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_win_startup_fix.py
+
+      - name: Configure with GCC C++23
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B out/build/linux-rexglue-cli -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DASURA_SKIP_CODEGEN=ON \
+            -DREXGLUE_USE_D3D12=OFF \
+            -DREXGLUE_USE_VULKAN=ON
+
+      - name: Build rexglue CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build out/build/linux-rexglue-cli --target rexglue --parallel
+
+      - name: Stage CLI bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/rexglue-cli/lib
+          exe="$(find out/build/linux-rexglue-cli -type f -name rexglue -perm -111 | head -1)"
+          test -n "$exe"
+          cp "$exe" out/rexglue-cli/rexglue
+          chmod +x out/rexglue-cli/rexglue
+
+          find out/build/linux-rexglue-cli tools/rexglue/out \
+            -type f \( -name '*.so' -o -name '*.so.*' \) -print0 2>/dev/null |
+            while IFS= read -r -d '' so; do
+              cp -L "$so" out/rexglue-cli/lib/ || true
+            done
+
+          echo "=== CLI version/help ==="
+          LD_LIBRARY_PATH="$PWD/out/rexglue-cli/lib" \
+            out/rexglue-cli/rexglue --help | head -80
+
+          echo "=== runtime deps ==="
+          LD_LIBRARY_PATH="$PWD/out/rexglue-cli/lib" \
+            ldd out/rexglue-cli/rexglue || true
+
+          tar -C out -czf out/ASURA_REXGLUE_CLI_LINUX.tar.gz rexglue-cli
+
+      - name: Upload CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_REXGLUE_CLI_LINUX
+          path: out/ASURA_REXGLUE_CLI_LINUX.tar.gz
+          if-no-files-found: error
+          retention-days: 7
