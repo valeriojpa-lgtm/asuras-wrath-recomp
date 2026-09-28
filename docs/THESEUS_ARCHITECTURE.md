@@ -1,18 +1,19 @@
 # Asura's Wrath — Theseus PC Port
 
-## T02: Native Paths + Config
+## T03: Native Filesystem
 
-T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moves
-portable path discovery and launcher configuration into that boundary while
-leaving runtime filesystem, input, audio, video and graphics behavior on
-ReXGlue.
+T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
+portable path discovery and launcher configuration into that boundary. T03
+moves physical PC filesystem ownership into Theseus while retaining one
+explicit guest-path compatibility bridge for the Xbox-shaped ABI still used by
+the recompiled game.
 
 ### Invariant
 
 The preserved baseline is `frozen/run04-launcher-pass`.
 Development happens only on `theseus/*` branches.
 
-At T02:
+At T03:
 
 ```
 Asura guest logic
@@ -20,10 +21,11 @@ Asura guest logic
 AsurawrathApp
       |
 TheseusPlatform
-  |-- portable paths   [native]
-  |-- config           [native]
+  |-- portable paths     [native]
+  |-- config             [native]
+  |-- NativeFileSystem   [native]
   |
-  +-- runtime services [ReXGlue]
+  +-- GuestFsBridge      [temporary ReXGlue path/ABI adapter]
       |
 Windows
 ```
@@ -91,3 +93,44 @@ UserData/Config/Asura.ini
 The file format is owned by Theseus. The current ReXGlue CVar mapping is only a
 temporary backend adapter and may disappear later without changing the user's
 configuration file.
+
+
+## T03 filesystem boundary
+
+T03 deliberately separates two different concepts that used to be mixed
+together:
+
+1. **Physical PC filesystem I/O** — file existence, directory creation, copying,
+   reading, writing and portable host layout. This belongs to Theseus.
+2. **Guest Xbox filesystem ABI/path translation** — exposing clean PC folders
+   under paths such as `\\Device\\Harddisk0\\Partition1\\BCGame`. This is a
+   temporary compatibility bridge and still uses ReXGlue.
+
+The only source files allowed to reference ReXGlue filesystem classes in T03
+are:
+
+```
+src/compat/rexglue_filesystem_bridge.h
+src/compat/rexglue_filesystem_bridge.cpp
+```
+
+CI fails if ReXGlue filesystem references escape that bridge.
+
+ISO/GDFX parsing is also kept inside the bridge for compatibility. It is an
+import path, not the canonical runtime layout. The canonical portable runtime
+remains:
+
+```
+Root/
+  Data/
+    default.xex
+    Game/
+      Content/
+      Cinematics/
+      Xbox360TOC.txt
+  UserData/
+```
+
+T03 does **not** claim that the Xbox guest file ABI has disappeared. That
+removal is a later milestone; T03's achievement is that ordinary PC file I/O
+and ownership no longer belong to ReXGlue.
