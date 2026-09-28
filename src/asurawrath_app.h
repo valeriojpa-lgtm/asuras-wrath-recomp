@@ -9,6 +9,8 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 
+#include "platform/theseus_platform.h"
+
 #if defined(__ANDROID__)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_hints.h>
@@ -160,6 +162,10 @@ public:
 #endif
 
   void OnPreSetup(rex::RuntimeConfig &config) override {
+    // T01: establish the ReXGlue-independent portable PC boundary. This is
+    // intentionally idempotent and does not replace any runtime service yet.
+    theseus::Platform::Instance().Bootstrap(
+        rex::filesystem::GetExecutableFolder());
 #if defined(__ANDROID__)
     SDL_SetHint(SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY, "1");
 #endif
@@ -285,8 +291,11 @@ public:
     // Portable Windows layout by default. An explicit --user_data_root still
     // wins, which keeps the normal ReXGlue override available for power users.
     if (REXCVAR_GET(user_data_root).empty()) {
-      paths.user_data_root =
-          rex::filesystem::GetExecutableFolder() / "UserData";
+      auto &host = theseus::Platform::Instance();
+      if (!host.initialized()) {
+        host.Bootstrap(rex::filesystem::GetExecutableFolder());
+      }
+      paths.user_data_root = host.paths().user_data;
     }
 #endif
 
