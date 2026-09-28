@@ -48,7 +48,32 @@ jobs:
           stage="$RUNNER_TEMP/asura-tu01-generated"
           rm -rf "$stage" generated/default
           mkdir -p "$stage"
-          unzip -q "$payload" -d "$stage"
+
+          # The frozen archive was produced on Windows and stores backslashes
+          # in ZIP member names. Normalize separators explicitly so Linux
+          # runners reconstruct the same directory tree without changing bytes.
+          python3 - "$payload" "$stage" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          root = pathlib.Path(sys.argv[2]).resolve()
+          with zipfile.ZipFile(archive) as zf:
+              for info in zf.infolist():
+                  rel = pathlib.PurePosixPath(info.filename.replace("\\", "/"))
+                  if rel.is_absolute() or ".." in rel.parts:
+                      raise SystemExit(f"unsafe ZIP member: {info.filename!r}")
+                  target = root.joinpath(*rel.parts)
+                  if info.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with zf.open(info) as src, target.open("wb") as dst:
+                      while chunk := src.read(1024 * 1024):
+                          dst.write(chunk)
+          PY
+
           test -d "$stage/generated/default"
           mkdir -p generated
           cp -a "$stage/generated/default" generated/default
