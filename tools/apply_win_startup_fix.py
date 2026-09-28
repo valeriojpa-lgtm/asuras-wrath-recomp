@@ -401,6 +401,14 @@ new_invalid_trap = """static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* 
   }
 
   REXLOG_ERROR(
+      "Unregistered PPC target {:08X} context: "
+      "LR={:08X} CTR={:08X} SP(r1)={:08X} TOC(r2)={:08X} "
+      "r3={:08X} r4={:08X} r5={:08X} r6={:08X}",
+      address, static_cast<uint32_t>(ctx.lr), ctx.ctr.u32,
+      ctx.r1.u32, ctx.r2.u32, ctx.r3.u32, ctx.r4.u32,
+      ctx.r5.u32, ctx.r6.u32);
+
+  REXLOG_ERROR(
       "Unregistered PPC target {:08X} words: "
       "{:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
       address, words[0], words[1], words[2], words[3],
