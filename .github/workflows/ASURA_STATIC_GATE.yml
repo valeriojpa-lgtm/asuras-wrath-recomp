@@ -112,6 +112,27 @@ jobs:
                   if row.get("address") == "0x829C9BD0":
                       print("  0x829C9BD0:", json.dumps(row, indent=2))
 
+          # Show the emitted owner body around the historical 0x829C9BD0
+          # target. This is source generated from the frozen checkpoint only;
+          # no copyrighted XEX bytes are stored or uploaded.
+          owner_marker = "DEFINE_REX_FUNC(sub_829C9BC0)"
+          for cpp in sorted(Path("generated/default").glob("asura_wrath_recomp.*.cpp")):
+              text = cpp.read_text(encoding="utf-8", errors="replace")
+              pos = text.find(owner_marker)
+              if pos < 0:
+                  continue
+              end = text.find("DEFINE_REX_FUNC(", pos + len(owner_marker))
+              if end < 0:
+                  end = min(len(text), pos + 12000)
+              body = text[pos:end]
+              lines = body.splitlines()
+              print(f"OWNER_SOURCE_FILE: {cpp.name}")
+              print("OWNER_SOURCE_BEGIN")
+              for line in lines[:220]:
+                  print(line)
+              print("OWNER_SOURCE_END")
+              break
+
       - name: Upload static audit report
         if: always()
         uses: actions/upload-artifact@v4
