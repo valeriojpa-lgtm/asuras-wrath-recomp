@@ -476,6 +476,10 @@ def main() -> int:
             "GPU adapter": "--d3d12_adapter=",
             "vsync": "--vsync=",
             "render scale": "--resolution_scale=",
+            "keyboard/mouse": "--mnk_mode=",
+            "mouse camera": "--mnk_mouse=",
+            "mouse sensitivity": "--mnk_sensitivity=",
+            "controller backend": "--input_backend=",
             "language": "--user_language=",
             "country": "--user_country=",
         }
@@ -489,7 +493,7 @@ def main() -> int:
         else:
             audit.ok(
                 "launcher.options",
-                "resolution, display mode, renderer/GPU, VSync, scaling and language controls are wired",
+                "resolution, display mode, renderer/GPU, VSync, scaling, keyboard/mouse, controller backend and language controls are wired",
             )
         if "WriteBool" in launcher and "WriteInt" in launcher and "ReadBool" in launcher and "ReadInt" in launcher:
             audit.ok("launcher.persistence", "launcher settings persistence is present")
@@ -498,17 +502,40 @@ def main() -> int:
     else:
         audit.fail("launcher.source", "src/asura_launcher_win.cpp missing")
 
-    # DLC is intentionally a readiness warning until native content discovery
-    # and mount logic exists. Creating Data/DLC in the portable package is not
-    # evidence that episodes are actually detected or mounted.
+    # Native DLC integration must be more than an empty Data/DLC directory:
+    # require source-package discovery, STFS validation, title/type filtering,
+    # ReXGlue ContentManager installation and partial-copy rollback.
     app_source = read_text(app_path) if app_path.is_file() else ""
-    if "Data/DLC" in app_source or "Data" + "/DLC" in app_source:
-        audit.ok("dlc.readiness", "DLC source path discovery is present")
-    else:
+    dlc_needles = {
+        "portable Data/DLC path": 'GetExecutableFolder() / "Data" / "DLC"',
+        "installer entrypoint": "InstallUserOwnedDlc",
+        "STFS header validation": "ReadPackageHeader",
+        "Marketplace content filter": "kMarketplaceContent",
+        "title-id filter": "kAsuraTitleId",
+        "managed install": "InstallContent(package_path)",
+        "partial-copy rollback": "DeleteContent(0, content_data)",
+        "post-TU01 invocation": "InstallUserOwnedDlc();",
+    }
+    missing_dlc = [
+        label for label, needle in dlc_needles.items()
+        if needle not in app_source
+    ]
+    if missing_dlc:
         audit.warn(
-            "dlc.readiness",
-            "Data/DLC is reserved in the portable layout, but native DLC discovery/mounting is not yet proven",
+            "dlc.integration",
+            "native user-owned DLC path is incomplete",
+            missing=missing_dlc,
         )
+    else:
+        audit.ok(
+            "dlc.integration",
+            "validated user-owned STFS discovery/install/rollback path is present after TU01 verification",
+        )
+
+    audit.warn(
+        "dlc.runtime-validation",
+        "DLC integration is structurally present, but the five owned Marketplace packages are not available to CI; episode enumeration/mount/gameplay remains unvalidated",
+    )
 
     if patch_path.is_file():
         patch = read_text(patch_path)
