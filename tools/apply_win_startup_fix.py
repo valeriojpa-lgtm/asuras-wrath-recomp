@@ -412,3 +412,87 @@ new_invalid_trap = """static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* 
 
 patch_once(dispatcher, old_invalid_trap, new_invalid_trap,
            "TU01 missing-entrypoint PPC dump")
+
+
+# 9) Conservative runtime recovery for codegen-missed PPC branch veneers.
+# Only a pure unconditional branch with LK=0 is auto-resolved. This preserves
+# guest semantics while eliminating a common class of indirect-call misses.
+old_resolve_indirect = """PPCFunc* ResolveIndirectFunction(uint32_t guest_address) {
+  FunctionDispatcher* dispatcher = GetBoundFunctionDispatcher();
+  if (!dispatcher) {
+    return &InvalidFunctionTrap;
+  }
+
+  if (PPCFunc* func = dispatcher->GetFunction(guest_address)) {
+    return func;
+  }
+
+  return &InvalidFunctionTrap;
+}"""
+
+new_resolve_indirect = """static PPCFunc* TryResolveBranchVeneer(FunctionDispatcher* dispatcher,
+                                            uint32_t guest_address) {
+  Runtime* runtime = Runtime::instance();
+  if (!runtime || !runtime->memory()) {
+    return nullptr;
+  }
+
+  uint32_t current = guest_address;
+  for (uint32_t depth = 0; depth < 8; ++depth) {
+    const uint8_t* p = runtime->memory()->TranslateVirtual(current);
+    const uint32_t insn = memory::load_and_swap<uint32_t>(p);
+
+    // PowerPC opcode 18 = b / ba / bl / bla. Auto-resolution is only safe
+    // for LK=0 because a link-setting branch has observable LR semantics.
+    if ((insn >> 26) != 18 || (insn & 1u) != 0) {
+      break;
+    }
+
+    uint32_t disp_bits = insn & 0x03FFFFFCu;
+    if (disp_bits & 0x02000000u) {
+      disp_bits |= 0xFC000000u;
+    }
+    const int32_t displacement = static_cast<int32_t>(disp_bits);
+    const bool absolute = (insn & 2u) != 0;
+    const uint32_t target =
+        absolute ? static_cast<uint32_t>(displacement)
+                 : current + static_cast<uint32_t>(displacement);
+
+    if (target == current) {
+      break;
+    }
+
+    if (PPCFunc* func = dispatcher->GetFunction(target)) {
+      // Cache the original veneer address so future calls are O(1).
+      if (dispatcher->SetFunction(guest_address, func)) {
+        REXLOG_INFO("Auto-resolved PPC branch veneer {:08X} -> {:08X}",
+                    guest_address, target);
+      }
+      return func;
+    }
+
+    current = target;
+  }
+
+  return nullptr;
+}
+
+PPCFunc* ResolveIndirectFunction(uint32_t guest_address) {
+  FunctionDispatcher* dispatcher = GetBoundFunctionDispatcher();
+  if (!dispatcher) {
+    return &InvalidFunctionTrap;
+  }
+
+  if (PPCFunc* func = dispatcher->GetFunction(guest_address)) {
+    return func;
+  }
+
+  if (PPCFunc* func = TryResolveBranchVeneer(dispatcher, guest_address)) {
+    return func;
+  }
+
+  return &InvalidFunctionTrap;
+}"""
+
+patch_once(dispatcher, old_resolve_indirect, new_resolve_indirect,
+           "TU01 conservative PPC branch-veneer resolver")
