@@ -116,6 +116,13 @@ jobs:
           if exist out\build\win-amd64-release\*.dll copy /y out\build\win-amd64-release\*.dll out\dist\Asuras_Wrath_Windows_x86_64\ >nul
           if exist tools\rexglue\out\win-amd64\*.dll copy /y tools\rexglue\out\win-amd64\*.dll out\dist\Asuras_Wrath_Windows_x86_64\ >nul
 
+          mkdir out\dist\Asuras_Wrath_Windows_x86_64\Data
+          mkdir out\dist\Asuras_Wrath_Windows_x86_64\Data\Update
+          >"out\dist\Asuras_Wrath_Windows_x86_64\Data\Update\PUT_TU01_HERE.txt" echo Put your original Asura's Wrath TU01 STFS package in this folder.
+          >>"out\dist\Asuras_Wrath_Windows_x86_64\Data\Update\PUT_TU01_HERE.txt" echo The portable EXE will verify it, extract default.xexp, and apply TU01 automatically.
+          >>"out\dist\Asuras_Wrath_Windows_x86_64\Data\Update\PUT_TU01_HERE.txt" echo The preserved retail default.xex is never modified.
+          >>"out\dist\Asuras_Wrath_Windows_x86_64\Data\Update\PUT_TU01_HERE.txt" echo No Python or external installer is required.
+
           powershell -NoProfile -Command "Compress-Archive -Path 'out\dist\Asuras_Wrath_Windows_x86_64\*' -DestinationPath 'out\dist\Asuras_Wrath_Windows_x86_64.zip' -Force"
 
       - name: Verify output
