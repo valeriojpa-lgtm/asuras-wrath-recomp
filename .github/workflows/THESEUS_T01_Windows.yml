@@ -71,23 +71,24 @@ jobs:
           Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
           Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
 
-          @"
-ASURA'S WRATH - THESEUS T01
-===========================
-
-Portable test build.
-
-Expected existing game layout next to this package:
-  Data\Game\Content
-  Data\Game\Cinematics
-  Data\Game\Xbox360TOC.txt
-
-T01 does not intentionally replace a ReXGlue runtime service.
-It establishes the independent TheseusPlatform boundary and preserves
-the known-good RUN04 behavior.
-
-No installation is required.
-"@ | Set-Content -Encoding UTF8 "$dist\THESEUS_README.txt"
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T01",
+            "===========================",
+            "",
+            "Portable test build.",
+            "",
+            "Expected existing game layout next to this package:",
+            "  Data\\Game\\Content",
+            "  Data\\Game\\Cinematics",
+            "  Data\\Game\\Xbox360TOC.txt",
+            "",
+            "T01 does not intentionally replace a ReXGlue runtime service.",
+            "It establishes the independent TheseusPlatform boundary and preserves",
+            "the known-good RUN04 behavior.",
+            "",
+            "No installation is required."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\\THESEUS_README.txt" -Value $readme
 
           $zip = "out/dist/ASURAS_WRATH_THESEUS_T01_PORTABLE.zip"
           if (Test-Path $zip) { Remove-Item -Force $zip }
