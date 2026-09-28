@@ -611,7 +611,7 @@ bool ShowLauncher(LauncherState& state) {
   wc.style = CS_HREDRAW | CS_VREDRAW;
   wc.lpfnWndProc = LauncherWndProc;
   wc.hInstance = instance;
-  wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));  // IDC_ARROW
   wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
   wc.lpszClassName = kLauncherClass;
   wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ASURA_ICON));
