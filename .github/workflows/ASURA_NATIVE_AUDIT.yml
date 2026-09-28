@@ -1,0 +1,186 @@
+name: ASURA Native Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_NATIVE_AUDIT.yml"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "includes/**"
+      - "src/**"
+      - "tools/**"
+      - "tu01/**"
+      - "asura_wrath_manifest.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asura-native-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Static audit + Debug/Release
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Reconstruct verified TU01 generated checkpoint
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $payload = Join-Path $env:RUNNER_TEMP "ASURA_TU01_GENERATED.zip"
+          $parts = @("tu01/ASURA_TU01_GENERATED.zip.part01", "tu01/ASURA_TU01_GENERATED.zip.part02")
+          $expected = "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+
+          foreach ($part in $parts) {
+            if (-not (Test-Path $part)) { throw "Missing TU01 payload part: $part" }
+          }
+
+          $out = [System.IO.File]::Create($payload)
+          try {
+            foreach ($part in $parts) {
+              $bytes = [System.IO.File]::ReadAllBytes($part)
+              $out.Write($bytes, 0, $bytes.Length)
+            }
+          } finally {
+            $out.Dispose()
+          }
+
+          $actual = (Get-FileHash $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "TU01 generated checkpoint SHA-256: $actual"
+          if ($actual -ne $expected) {
+            throw "TU01 generated checkpoint hash mismatch. Expected $expected, got $actual"
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "asura-tu01-generated"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
+
+          $generated = Join-Path $stage "generated/default"
+          if (-not (Test-Path $generated)) { throw "TU01 archive does not contain generated/default" }
+
+          if (Test-Path "generated/default") { Remove-Item "generated/default" -Recurse -Force }
+          Copy-Item $generated "generated/default" -Recurse -Force
+
+          $stamp = (Get-Date).ToUniversalTime().AddMinutes(-2)
+          Get-ChildItem "generated/default" -Recurse -File | ForEach-Object { $_.LastWriteTimeUtc = $stamp }
+
+          $cppCount = (Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp").Count
+          if ($cppCount -ne 207) { throw "Unexpected TU01 partition count: $cppCount (expected 207)" }
+
+      - name: Static codegen integrity audit
+        shell: cmd
+        run: python tools\asura_native_audit.py --report out\audit\asura_native_audit.json
+
+      - name: Apply project-owned ReXGlue compatibility patches
+        shell: cmd
+        run: python tools\apply_win_startup_fix.py
+
+      - name: Verify patched ReXGlue invariants
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dispatcher = Get-Content "tools/rexglue/src/system/function_dispatcher.cpp" -Raw
+          $userModule = Get-Content "tools/rexglue/src/system/user_module.cpp" -Raw
+          $xamInfo = Get-Content "tools/rexglue/src/kernel/xam/xam_info.cpp" -Raw
+
+          foreach ($needle in @("TryResolveBranchVeneer", "Unregistered PPC target", "ResolveIndirectFunction")) {
+            if (-not $dispatcher.Contains($needle)) { throw "Patched dispatcher invariant missing: $needle" }
+          }
+          if (-not $userModule.Contains('!xex_module()->is_patch()')) { throw "XEXP recursion guard is missing" }
+          if (-not $userModule.Contains('update:\\default.xexp')) { throw "Portable TU01 XEXP fallback is missing" }
+          if (-not $xamInfo.Contains("REXCVAR_GET(user_language)")) { throw "Runtime language routing is missing" }
+
+      - name: Configure Debug
+        shell: cmd
+        run: |
+          if exist out\build\win-amd64-debug rmdir /s /q out\build\win-amd64-debug
+          cmake --preset win-amd64-debug -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+
+      - name: Build Debug
+        shell: cmd
+        run: cmake --build out/build/win-amd64-debug --target asura_wrath_recomp --parallel
+
+      - name: Configure Release
+        shell: cmd
+        run: |
+          if exist out\build\win-amd64-release rmdir /s /q out\build\win-amd64-release
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+
+      - name: Build Release
+        shell: cmd
+        run: cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+
+      - name: Stage portable PC layout
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = "out/dist/Asuras_Wrath_Windows_x86_64"
+          if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dist/Data/Game" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dist/Data/Update" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dist/Data/DLC" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dist/UserData" | Out-Null
+
+          Copy-Item "out/build/win-amd64-release/Asura's Wrath.exe" $dist -Force
+          Get-ChildItem "out/build/win-amd64-release" -Filter *.dll -ErrorAction SilentlyContinue | Copy-Item -Destination $dist -Force
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -ErrorAction SilentlyContinue | Copy-Item -Destination $dist -Force
+
+          $exe = Join-Path $dist "Asura's Wrath.exe"
+          if (-not (Test-Path $exe)) { throw "Portable EXE missing" }
+
+          foreach ($dir in @("Data/Game", "Data/Update", "Data/DLC", "UserData")) {
+            if (-not (Test-Path (Join-Path $dist $dir))) { throw "Portable directory missing: $dir" }
+          }
+
+          $forbidden = Get-ChildItem $dist -Recurse -File | Where-Object {
+            $_.Name -ieq "default.xex" -or $_.Name -ieq "default.xexp" -or $_.Extension -ieq ".iso"
+          }
+          if ($forbidden) { throw "Copyrighted game payload unexpectedly entered the distributable layout" }
+
+          Compress-Archive -Path "$dist/*" -DestinationPath "out/dist/Asuras_Wrath_Windows_x86_64.zip" -Force
+
+      - name: Portable artifact audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = "out/dist/Asuras_Wrath_Windows_x86_64"
+          foreach ($item in @("Asura's Wrath.exe", "Data/Game", "Data/Update", "Data/DLC", "UserData")) {
+            if (-not (Test-Path (Join-Path $dist $item))) { throw "Portable layout audit failed: missing $item" }
+          }
+          Get-ChildItem $dist -Recurse | Select-Object FullName, Length
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_NATIVE_AUDIT_REPORT
+          path: out/audit/asura_native_audit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload audited portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_TU01_AUDITED
+          path: out/dist/Asuras_Wrath_Windows_x86_64.zip
+          if-no-files-found: error
+          retention-days: 30
