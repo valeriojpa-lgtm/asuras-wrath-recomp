@@ -80,25 +80,6 @@ jobs:
             $_.LastWriteTimeUtc = $stamp
           }
 
-          # TU01 runtime entrypoint compatibility.
-          # Initial XThread enters at 0x82B75150, while codegen emitted xstart at 0x82B75160.
-          # Patch only the transient extracted sources; the frozen TU01 ZIP remains untouched.
-          $initPath = "generated/default/asura_wrath_init.cpp"
-          $regPath = "generated/default/asura_wrath_register.cpp"
-          $initText = Get-Content $initPath -Raw
-          if ($initText -notmatch "0x82B75150") {
-            $initText = $initText.Replace("{ 0x82B75160, xstart },", "{ 0x82B75150, xstart },`r`n`t{ 0x82B75160, xstart },")
-            $initText = $initText.Replace("{ 0x82B54B68, sub_82B54B68 },", "{ 0x82B54B58, sub_82B54B68 },`r`n`t{ 0x82B54B68, sub_82B54B68 },")
-            Set-Content -LiteralPath $initPath -Value $initText -Encoding UTF8
-          }
-          $regText = Get-Content $regPath -Raw
-          if ($regText -notmatch "SetFunction\(0x82B75150") {
-            $regText = $regText.Replace("registrar->SetFunction(0x82B75160, xstart);", "registrar->SetFunction(0x82B75150, xstart);`r`n  registrar->SetFunction(0x82B75160, xstart);")
-            $regText = $regText.Replace("registrar->SetFunction(0x82B54B68, sub_82B54B68);", "registrar->SetFunction(0x82B54B58, sub_82B54B68);`r`n  registrar->SetFunction(0x82B54B68, sub_82B54B68);")
-            Set-Content -LiteralPath $regPath -Value $regText -Encoding UTF8
-          }
-          Write-Host "TU01 entry aliases installed: 0x82B75150 -> xstart; 0x82B54B58 -> sub_82B54B68"
-
           $cppCount = (Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp").Count
           if ($cppCount -ne 207) {
             throw "Unexpected TU01 partition count: $cppCount (expected 207)"
