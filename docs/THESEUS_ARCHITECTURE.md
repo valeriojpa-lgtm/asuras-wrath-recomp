@@ -1,25 +1,29 @@
 # Asura's Wrath — Theseus PC Port
 
-## T01: Platform Bootstrap
+## T02: Native Paths + Config
 
-T01 introduces a **ReXGlue-independent PC platform boundary** without
-intentionally changing the frozen RUN04 runtime behavior.
+T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moves
+portable path discovery and launcher configuration into that boundary while
+leaving runtime filesystem, input, audio, video and graphics behavior on
+ReXGlue.
 
 ### Invariant
 
 The preserved baseline is `frozen/run04-launcher-pass`.
 Development happens only on `theseus/*` branches.
 
-At T01:
+At T02:
 
 ```
 Asura guest logic
       |
 AsurawrathApp
       |
-TheseusPlatform   <- new stable PC-facing boundary
-      |
-ReXGlue           <- still supplies every game service
+TheseusPlatform
+  |-- portable paths   [native]
+  |-- config           [native]
+  |
+  +-- runtime services [ReXGlue]
       |
 Windows
 ```
@@ -69,3 +73,21 @@ layout; large game data does not need to be reorganized.
 
 The rest of the host application is expected to contain ReXGlue references at
 T01. Their count becomes a measurable migration signal in later milestones.
+
+
+## T02 validation contract
+
+A test build may live in a sibling folder such as `THESEUS_T02` while sharing
+the immutable game data in `../Data`. The executable must locate that Data
+folder by itself; the validation launch must not rely on a helper CMD or a
+`--game_data_root` argument.
+
+Launcher settings are stored in:
+
+```
+UserData/Config/Asura.ini
+```
+
+The file format is owned by Theseus. The current ReXGlue CVar mapping is only a
+temporary backend adapter and may disappear later without changing the user's
+configuration file.
