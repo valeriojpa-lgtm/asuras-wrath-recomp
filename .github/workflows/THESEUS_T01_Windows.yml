@@ -1,0 +1,110 @@
+name: THESEUS T01 - Platform Bootstrap
+
+on:
+  push:
+    branches:
+      - theseus/bootstrap
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T01
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved RUN04 ReXGlue patches
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T01
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Package portable T01
+        shell: powershell
+        run: |
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T01"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item "out/build/win-amd64-release/Asura's Wrath.exe" $dist
+          Get-ChildItem "out/build/win-amd64-release" -Filter *.dll -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          New-Item -ItemType Directory -Force -Path "$dist/UserData" | Out-Null
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          @"
+ASURA'S WRATH - THESEUS T01
+===========================
+
+Portable test build.
+
+Expected existing game layout next to this package:
+  Data\Game\Content
+  Data\Game\Cinematics
+  Data\Game\Xbox360TOC.txt
+
+T01 does not intentionally replace a ReXGlue runtime service.
+It establishes the independent TheseusPlatform boundary and preserves
+the known-good RUN04 behavior.
+
+No installation is required.
+"@ | Set-Content -Encoding UTF8 "$dist\THESEUS_README.txt"
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T01_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T01_PORTABLE.zip"
+          Write-Host "Portable package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T01
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T01_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T01_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
