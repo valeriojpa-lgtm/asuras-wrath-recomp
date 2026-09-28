@@ -100,8 +100,13 @@ jobs:
           $userModule = Get-Content "tools/rexglue/src/system/user_module.cpp" -Raw
           $xamInfo = Get-Content "tools/rexglue/src/kernel/xam/xam_info.cpp" -Raw
 
-          foreach ($needle in @("TryResolveBranchVeneer", "Unregistered PPC target", "ResolveIndirectFunction")) {
+          foreach ($needle in @("TryResolveBranchVeneer", "Unregistered PPC target", "ResolveIndirectFunction", "FindCallerModuleBase(current)")) {
             if (-not $dispatcher.Contains($needle)) { throw "Patched dispatcher invariant missing: $needle" }
+          }
+
+          $discover = Get-Content "tools/rexglue/src/codegen/phase_discover.cpp" -Raw
+          foreach ($needle in @("conservativeIndirectCallScan", "getFunctionContaining(addr)", "Opcode::bcctrl")) {
+            if (-not $discover.Contains($needle)) { throw "Patched codegen invariant missing: $needle" }
           }
           if (-not $userModule.Contains('!xex_module()->is_patch()')) { throw "XEXP recursion guard is missing" }
           if (-not $userModule.Contains('update:\\default.xexp')) { throw "Portable TU01 XEXP fallback is missing" }
@@ -113,14 +118,17 @@ jobs:
           if exist out\build\win-amd64-debug rmdir /s /q out\build\win-amd64-debug
           cmake --preset win-amd64-debug -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
 
-      - name: Build Debug
+      - name: Build Debug rexcodegen
         shell: cmd
-        run: |
-          cmake --build out/build/win-amd64-debug --target asura_wrath_recomp --parallel
-          if errorlevel 1 exit /b %errorlevel%
-          cmake --build out/build/win-amd64-debug --target asura_tu_image_audit --parallel
-          if errorlevel 1 exit /b %errorlevel%
-          cmake --build out/build/win-amd64-debug --target rexcodegen --parallel
+        run: cmake --build out/build/win-amd64-debug --target rexcodegen --parallel
+
+      - name: Build Debug offline TU tool
+        shell: cmd
+        run: cmake --build out/build/win-amd64-debug --target asura_tu_image_audit --parallel
+
+      - name: Build Debug game
+        shell: cmd
+        run: cmake --build out/build/win-amd64-debug --target asura_wrath_recomp --parallel
 
       - name: Configure Release
         shell: cmd
@@ -128,14 +136,17 @@ jobs:
           if exist out\build\win-amd64-release rmdir /s /q out\build\win-amd64-release
           cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
 
-      - name: Build Release
+      - name: Build Release rexcodegen
         shell: cmd
-        run: |
-          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
-          if errorlevel 1 exit /b %errorlevel%
-          cmake --build out/build/win-amd64-release --target asura_tu_image_audit --parallel
-          if errorlevel 1 exit /b %errorlevel%
-          cmake --build out/build/win-amd64-release --target rexcodegen --parallel
+        run: cmake --build out/build/win-amd64-release --target rexcodegen --parallel
+
+      - name: Build Release offline TU tool
+        shell: cmd
+        run: cmake --build out/build/win-amd64-release --target asura_tu_image_audit --parallel
+
+      - name: Build Release game
+        shell: cmd
+        run: cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
 
       - name: Stage portable PC layout
         shell: powershell
