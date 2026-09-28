@@ -382,6 +382,50 @@ def main() -> int:
     else:
         audit.fail("runtime.tu01-source", "src/asurawrath_app.h missing")
 
+    launcher_path = root / "src" / "asura_launcher_win.cpp"
+    if launcher_path.is_file():
+        launcher = read_text(launcher_path)
+        launcher_needles = {
+            "resolution": "--window_width=",
+            "window/fullscreen": "--fullscreen=",
+            "renderer selection": "--gpu_backend=",
+            "GPU adapter": "--d3d12_adapter=",
+            "vsync": "--vsync=",
+            "render scale": "--resolution_scale=",
+            "language": "--user_language=",
+            "country": "--user_country=",
+        }
+        absent = [label for label, needle in launcher_needles.items() if needle not in launcher]
+        if absent:
+            audit.fail(
+                "launcher.options",
+                "native launcher is missing required portable-PC controls",
+                items=absent,
+            )
+        else:
+            audit.ok(
+                "launcher.options",
+                "resolution, display mode, renderer/GPU, VSync, scaling and language controls are wired",
+            )
+        if "WriteBool" in launcher and "WriteInt" in launcher and "ReadBool" in launcher and "ReadInt" in launcher:
+            audit.ok("launcher.persistence", "launcher settings persistence is present")
+        else:
+            audit.fail("launcher.persistence", "launcher settings persistence hooks are incomplete")
+    else:
+        audit.fail("launcher.source", "src/asura_launcher_win.cpp missing")
+
+    # DLC is intentionally a readiness warning until native content discovery
+    # and mount logic exists. Creating Data/DLC in the portable package is not
+    # evidence that episodes are actually detected or mounted.
+    app_source = read_text(app_path) if app_path.is_file() else ""
+    if "Data/DLC" in app_source or "Data" + "/DLC" in app_source:
+        audit.ok("dlc.readiness", "DLC source path discovery is present")
+    else:
+        audit.warn(
+            "dlc.readiness",
+            "Data/DLC is reserved in the portable layout, but native DLC discovery/mounting is not yet proven",
+        )
+
     if patch_path.is_file():
         patch = read_text(patch_path)
         if "TryResolveBranchVeneer" not in patch or "opcode 18" not in patch:
