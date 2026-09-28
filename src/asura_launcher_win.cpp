@@ -39,6 +39,8 @@ enum ControlId : int {
   kMsaa,
   kFxaa,
   kMnk,
+  kMnkMouse,
+  kMnkSensitivity,
   kInputBackend,
   kLanguage,
   kShowAtStartup,
@@ -69,6 +71,8 @@ struct LanguageOption {
   int country_id;
 };
 
+constexpr int kMouseSensitivities[] = {50, 75, 100, 125, 150, 200};
+
 constexpr LanguageOption kLanguages[] = {
     {L"English", 1, 103},
     {L"Español", 5, 31},
@@ -98,6 +102,8 @@ struct LauncherSettings {
   bool native_2x_msaa = true;
   int fxaa = 0;            // 0 off, 1 FXAA, 2 FXAA Extreme
   bool mnk = true;
+  bool mnk_mouse = true;
+  int mnk_sensitivity = 100;  // percent, maps to ReXGlue 0.5-2.0
   int input_backend = 0;  // 0 SDL, 1 XInput
   int language = 1;
   int country = 103;
@@ -219,6 +225,9 @@ LauncherSettings LoadSettings(const std::filesystem::path& path) {
   s.native_2x_msaa = ReadBool(path, L"Native2xMSAA", s.native_2x_msaa);
   s.fxaa = std::clamp(ReadInt(path, L"FXAA", s.fxaa), 0, 2);
   s.mnk = ReadBool(path, L"KeyboardMouse", s.mnk);
+  s.mnk_mouse = ReadBool(path, L"MouseCamera", s.mnk_mouse);
+  s.mnk_sensitivity =
+      std::clamp(ReadInt(path, L"MouseSensitivity", s.mnk_sensitivity), 50, 200);
   s.input_backend = ReadInt(path, L"InputBackend", s.input_backend);
   s.language = ReadInt(path, L"Language", s.language);
   s.country = ReadInt(path, L"Country", s.country);
@@ -249,6 +258,8 @@ void SaveSettings(const std::filesystem::path& path, const LauncherSettings& s) 
   WriteBool(path, L"Native2xMSAA", s.native_2x_msaa);
   WriteInt(path, L"FXAA", s.fxaa);
   WriteBool(path, L"KeyboardMouse", s.mnk);
+  WriteBool(path, L"MouseCamera", s.mnk_mouse);
+  WriteInt(path, L"MouseSensitivity", s.mnk_sensitivity);
   WriteInt(path, L"InputBackend", s.input_backend);
   WriteInt(path, L"Language", s.language);
   WriteInt(path, L"Country", s.country);
@@ -273,7 +284,7 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--resolution_scale=",
       "--anisotropic_override=", "--native_2x_msaa=", "--swap_post_effect=",
-      "--mnk_mode=", "--mnk_mouse=", "--input_backend=",
+      "--mnk_mode=", "--mnk_mouse=", "--mnk_sensitivity=", "--input_backend=",
       "--user_language=", "--user_country=",
   };
   std::erase_if(args, [](const std::string& arg) {
@@ -322,7 +333,8 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_string("swap_post_effect",
              s.fxaa == 2 ? "fxaa_extreme" : (s.fxaa == 1 ? "fxaa" : "none"));
   add_bool("mnk_mode", s.mnk);
-  add_bool("mnk_mouse", false);
+  add_bool("mnk_mouse", s.mnk_mouse);
+  add_string("mnk_sensitivity", std::to_string(s.mnk_sensitivity / 100.0));
   add_string("input_backend", s.input_backend == 1 ? "xinput" : "sdl");
   add_int("user_language", s.language);
   add_int("user_country", s.country);
@@ -389,6 +401,8 @@ struct LauncherState {
   HWND msaa = nullptr;
   HWND fxaa = nullptr;
   HWND mnk = nullptr;
+  HWND mnk_mouse = nullptr;
+  HWND mnk_sensitivity = nullptr;
   HWND input_backend = nullptr;
   HWND language = nullptr;
   HWND show_at_startup = nullptr;
@@ -400,6 +414,19 @@ struct LauncherState {
       }
     }
     return 0;
+  }
+
+  int FindMouseSensitivityIndex(int sensitivity) const {
+    int best = 0;
+    int best_distance = std::abs(kMouseSensitivities[0] - sensitivity);
+    for (size_t i = 1; i < std::size(kMouseSensitivities); ++i) {
+      const int distance = std::abs(kMouseSensitivities[i] - sensitivity);
+      if (distance < best_distance) {
+        best = static_cast<int>(i);
+        best_distance = distance;
+      }
+    }
+    return best;
   }
 
   int FindLanguageIndex(int language_id) const {
@@ -518,20 +545,31 @@ struct LauncherState {
     SendMessageW(input_backend, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"XInput"));
 
-    CreateLabel(hwnd, font, L"LANGUAGE", 28, 534, 180, 22);
-    CreateLabel(hwnd, font, L"Game language", 42, 568, 145, 24);
-    language = CreateCombo(hwnd, font, kLanguage, 195, 564, 280, 220);
+    mnk_mouse = CreateCheck(hwnd, font, kMnkMouse, L"Mouse camera",
+                            42, 524, 230, 26);
+    CreateLabel(hwnd, font, L"Mouse sensitivity", 330, 526, 145, 24);
+    mnk_sensitivity =
+        CreateCombo(hwnd, font, kMnkSensitivity, 480, 522, 185, 180);
+    for (const wchar_t* option :
+         {L"50%", L"75%", L"100%", L"125%", L"150%", L"200%"}) {
+      SendMessageW(mnk_sensitivity, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(option));
+    }
+
+    CreateLabel(hwnd, font, L"LANGUAGE", 28, 574, 180, 22);
+    CreateLabel(hwnd, font, L"Game language", 42, 608, 145, 24);
+    language = CreateCombo(hwnd, font, kLanguage, 195, 604, 280, 220);
     for (const auto& option : kLanguages) {
       SendMessageW(language, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(option.label));
     }
     show_at_startup = CreateCheck(
         hwnd, font, kShowAtStartup, L"Show this launcher at startup",
-        500, 564, 220, 26);
+        500, 604, 220, 26);
 
-    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 626, 110, 34);
-    CreateButton(hwnd, font, kExit, L"Exit", 520, 626, 90, 34);
-    CreateButton(hwnd, font, kPlay, L"Play", 620, 626, 110, 34, true);
+    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 666, 110, 34);
+    CreateButton(hwnd, font, kExit, L"Exit", 520, 666, 90, 34);
+    CreateButton(hwnd, font, kPlay, L"Play", 620, 666, 110, 34, true);
 
     ApplySettingsToControls();
   }
@@ -550,6 +588,11 @@ struct LauncherState {
     SendMessageW(msaa, CB_SETCURSEL, settings.native_2x_msaa ? 0 : 1, 0);
     SendMessageW(fxaa, CB_SETCURSEL, std::clamp(settings.fxaa, 0, 2), 0);
     SetCheck(mnk, settings.mnk);
+    SetCheck(mnk_mouse, settings.mnk_mouse);
+    SendMessageW(mnk_sensitivity, CB_SETCURSEL,
+                 FindMouseSensitivityIndex(settings.mnk_sensitivity), 0);
+    EnableWindow(mnk_mouse, settings.mnk);
+    EnableWindow(mnk_sensitivity, settings.mnk && settings.mnk_mouse);
     SendMessageW(input_backend, CB_SETCURSEL,
                  std::clamp(settings.input_backend, 0, 1), 0);
     SendMessageW(language, CB_SETCURSEL,
@@ -590,6 +633,12 @@ struct LauncherState {
     settings.fxaa =
         std::clamp(static_cast<int>(SendMessageW(fxaa, CB_GETCURSEL, 0, 0)), 0, 2);
     settings.mnk = GetCheck(mnk);
+    settings.mnk_mouse = GetCheck(mnk_mouse);
+    const int mouse_sensitivity_index =
+        std::clamp(static_cast<int>(
+                       SendMessageW(mnk_sensitivity, CB_GETCURSEL, 0, 0)),
+                   0, static_cast<int>(std::size(kMouseSensitivities)) - 1);
+    settings.mnk_sensitivity = kMouseSensitivities[mouse_sensitivity_index];
     settings.input_backend =
         std::clamp(static_cast<int>(SendMessageW(input_backend, CB_GETCURSEL, 0, 0)), 0, 1);
 
@@ -638,6 +687,19 @@ LRESULT CALLBACK LauncherWndProc(HWND hwnd, UINT message,
         return 0;
       }
       if (HIWORD(wparam) == BN_CLICKED) {
+        if (LOWORD(wparam) == kMnk) {
+          const bool enabled = state->GetCheck(state->mnk);
+          EnableWindow(state->mnk_mouse, enabled);
+          EnableWindow(state->mnk_sensitivity,
+                       enabled && state->GetCheck(state->mnk_mouse));
+          return 0;
+        }
+        if (LOWORD(wparam) == kMnkMouse) {
+          EnableWindow(state->mnk_sensitivity,
+                       state->GetCheck(state->mnk) &&
+                           state->GetCheck(state->mnk_mouse));
+          return 0;
+        }
         switch (LOWORD(wparam)) {
           case kDefaults:
             state->ResetDefaults();
@@ -691,7 +753,7 @@ bool ShowLauncher(LauncherState& state) {
   RegisterClassExW(&wc);
 
   constexpr int width = 780;
-  constexpr int height = 720;
+  constexpr int height = 760;
   RECT rect{0, 0, width, height};
   AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                      FALSE, 0);
