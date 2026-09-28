@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T04 Theseus dependency audit.
+"""T04.1 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -86,6 +86,7 @@ def main() -> int:
         "T04 ContentManager native save root",
         "T04 Theseus profile identity",
         "T04 auto-confirm first save creation",
+        'REXCVAR_DEFINE_BOOL(asura_first_run, false, "Theseus"',
     )
     missing_save_markers = [
         marker for marker in save_bridge_markers if marker not in patch_script
@@ -95,7 +96,7 @@ def main() -> int:
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T04-native-saves-profile",
+        "Milestone: T04.1-first-run-polish",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -138,11 +139,12 @@ def main() -> int:
 
     lines += [
         "",
-        "T04 invariant:",
+        "T04.1 invariant:",
         "  Physical save/profile policy is Theseus-owned under UserData/Saves.",
         "  Existing Xbox save package format is preserved for compatibility.",
         "  ReXGlue remains only as the temporary XAM save/profile ABI bridge.",
-        "  Empty SavedGame enumeration may auto-confirm Asura's one-shot create prompt.",
+        "  Native first-run state drives Asura's one-shot create prompt suppression.",
+        "  SavedGame enumeration remains only as a compatibility fallback.",
         "",
     ]
 
