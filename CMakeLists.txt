@@ -67,6 +67,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_platform.cpp
   src/platform/theseus_config.cpp
   src/platform/theseus_filesystem.cpp
+  src/platform/theseus_saves.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
