@@ -381,3 +381,34 @@ new_patch_lookup = """  // Search for an XEX patch only while loading a normal m
 
 patch_once(user_module, old_patch_lookup, new_patch_lookup,
            "TU01 update-device XEXP fallback")
+
+
+# 8) TU01 diagnostics: if codegen misses an indirect-call entrypoint, dump the
+# real PPC words from the already-patched guest image before trapping. This
+# avoids guessing aliases and lets us reconstruct the exact omitted thunk.
+dispatcher = Path("tools/rexglue/src/system/function_dispatcher.cpp")
+
+old_invalid_trap = """static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
+  REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
+            ctx.last_indirect_target);
+}"""
+
+new_invalid_trap = """static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* base) {
+  const uint32_t address = ctx.last_indirect_target;
+  uint32_t words[8] = {};
+  for (size_t i = 0; i < 8; ++i) {
+    words[i] = memory::load_and_swap<uint32_t>(base + address + uint32_t(i * 4));
+  }
+
+  REXLOG_ERROR(
+      "Unregistered PPC target {:08X} words: "
+      "{:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+      address, words[0], words[1], words[2], words[3],
+      words[4], words[5], words[6], words[7]);
+
+  REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
+            address);
+}"""
+
+patch_once(dispatcher, old_invalid_trap, new_invalid_trap,
+           "TU01 missing-entrypoint PPC dump")
