@@ -118,7 +118,8 @@ bool NativeFileSystem::WriteAllBytes(const std::filesystem::path& path,
 
 bool NativeFileSystem::WriteText(const std::filesystem::path& path,
                                  std::string_view text) const {
-  const auto bytes = std::as_bytes(std::span{text.data(), text.size()});
+  const auto bytes =
+      std::as_bytes(std::span<const char>(text.data(), text.size()));
   return WriteAllBytes(path, bytes);
 }
 
