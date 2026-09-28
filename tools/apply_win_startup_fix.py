@@ -550,7 +550,7 @@ namespace phases {
 
 VoidResult Discover(CodegenContext& ctx, ProgressReporter* reporter) {"""
 
-pointer_helper_replacement = r"""bool IsKnownCallable(const FunctionGraph& graph, uint32_t address) {
+pointer_helper_replacement = r"""bool IsKnownCallable(FunctionGraph& graph, uint32_t address) {
   return graph.getFunction(address) != nullptr || graph.isImport(address);
 }
 
