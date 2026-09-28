@@ -762,3 +762,42 @@ pointer_call_replacement = """  size_t newIndirectTargets = conservativeIndirect
 
 patch_once(phase_discover, pointer_call_anchor, pointer_call_replacement,
            "run conservative pointer-table discovery")
+
+
+# 12) Shutdown diagnostics only: preserve ReXGlue's safe hard-exit policy, but
+# make cooperative-shutdown stragglers visible in the final log so a future
+# clean-exit change can be based on evidence rather than guesswork.
+kernel_state_cpp = Path("tools/rexglue/src/system/kernel_state.cpp")
+
+shutdown_anchor = """  WaitForThreadsToExit(target_threads, kCooperativeExitTimeoutMs);
+
+  // Stragglers are deliberately left running, never force-killed: TerminateThread
+  // orphans whatever host lock the thread holds (CRT heap, mutexes) and deadlocks
+  // teardown. Window close hard-exits and lets the OS reap them."""
+
+shutdown_replacement = """  WaitForThreadsToExit(target_threads, kCooperativeExitTimeoutMs);
+
+  size_t shutdown_stragglers = 0;
+  for (const auto& thread : target_threads) {
+    if (!thread->is_running()) {
+      continue;
+    }
+    ++shutdown_stragglers;
+    REXSYS_WARN(
+        "TerminateTitle: guest thread {} ('{}') did not exit cooperatively "
+        "within {} ms",
+        thread->thread_id(), thread->name(), kCooperativeExitTimeoutMs);
+  }
+  if (shutdown_stragglers == 0) {
+    REXSYS_INFO("TerminateTitle: all guest threads exited cooperatively");
+  } else {
+    REXSYS_WARN("TerminateTitle: {} guest thread(s) remain; retaining safe hard-exit policy",
+                shutdown_stragglers);
+  }
+
+  // Stragglers are deliberately left running, never force-killed: TerminateThread
+  // orphans whatever host lock the thread holds (CRT heap, mutexes) and deadlocks
+  // teardown. Window close hard-exits and lets the OS reap them."""
+
+patch_once(kernel_state_cpp, shutdown_anchor, shutdown_replacement,
+           "cooperative shutdown straggler diagnostics")
