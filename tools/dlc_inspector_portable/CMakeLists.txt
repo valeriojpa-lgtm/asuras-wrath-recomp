@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(ASURA_DLC_Inspector LANGUAGES CXX)
+add_executable(ASURA_DLC_Inspector main.cpp)
+target_compile_features(ASURA_DLC_Inspector PRIVATE cxx_std_17)
+if(MSVC)
+  set_property(TARGET ASURA_DLC_Inspector PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+  target_compile_options(ASURA_DLC_Inspector PRIVATE /O2 /utf-8)
+endif()
