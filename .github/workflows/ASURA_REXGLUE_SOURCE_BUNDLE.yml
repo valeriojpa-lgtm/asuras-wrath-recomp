@@ -1,0 +1,43 @@
+name: ASURA ReXGlue Source Bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_REXGLUE_SOURCE_BUNDLE.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Package exact ReXGlue source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f tools/rexglue/CMakeLists.txt
+          test -f tools/rexglue/thirdparty/libmspack/libmspack/mspack/lzxd.c
+          mkdir -p out
+          tar \
+            --exclude='tools/rexglue/.git' \
+            --exclude='tools/rexglue/**/.git' \
+            -czf out/rexglue_source_bundle.tar.gz tools/rexglue
+          sha256sum out/rexglue_source_bundle.tar.gz
+          du -h out/rexglue_source_bundle.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_REXGLUE_SOURCE_BUNDLE
+          path: out/rexglue_source_bundle.tar.gz
+          if-no-files-found: error
+          retention-days: 7
