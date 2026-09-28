@@ -7,10 +7,11 @@
 #include <string_view>
 
 #include "platform/theseus_filesystem.h"
+#include "platform/theseus_saves.h"
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T03-native-filesystem";
+inline constexpr std::string_view kMilestone = "T04-native-saves-profile";
 
 enum class Backend {
   kReXGlue,
@@ -62,6 +63,8 @@ class Platform final {
   [[nodiscard]] const PortablePaths& paths() const noexcept { return paths_; }
   [[nodiscard]] NativeFileSystem& files() noexcept { return files_; }
   [[nodiscard]] const NativeFileSystem& files() const noexcept { return files_; }
+  [[nodiscard]] NativeSaveSystem& saves() noexcept { return saves_; }
+  [[nodiscard]] const NativeSaveSystem& saves() const noexcept { return saves_; }
   [[nodiscard]] Backend backend(Service service) const noexcept;
 
  private:
@@ -69,6 +72,7 @@ class Platform final {
 
   PortablePaths paths_{};
   NativeFileSystem files_{};
+  NativeSaveSystem saves_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
   bool initialized_ = false;
 };
