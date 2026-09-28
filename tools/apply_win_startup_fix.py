@@ -644,10 +644,13 @@ old_message_result = """  X_RESULT result;
   if (REXCVAR_GET(headless)) {"""
 
 new_message_result = """  // Project-specific PC polish: only auto-confirm when SavedGame enumeration
-  // has just proven there is no save and this is a two-button prompt. The flag
-  // is one-shot, so unrelated message boxes keep their normal UI.
-  if (REXCVAR_GET(asura_auto_first_save_prompt) && button_count == 2 &&
-      g_asura_missing_saved_game.exchange(false, std::memory_order_acq_rel)) {
+  // has just proven there is no save and the immediately following prompt has
+  // two buttons. Consume the one-shot state on the next message regardless so
+  // it can never leak into an unrelated later dialog.
+  const bool missing_saved_game =
+      g_asura_missing_saved_game.exchange(false, std::memory_order_acq_rel);
+  if (REXCVAR_GET(asura_auto_first_save_prompt) && missing_saved_game &&
+      button_count == 2) {
     auto run = [result_ptr]() -> X_RESULT {
       *result_ptr = 0;  // first button: affirmative in Asura's creation prompt
       return X_ERROR_SUCCESS;
