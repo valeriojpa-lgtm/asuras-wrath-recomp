@@ -66,6 +66,8 @@ endif()
 list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_platform.cpp
   src/platform/theseus_config.cpp
+  src/platform/theseus_filesystem.cpp
+  src/compat/rexglue_filesystem_bridge.cpp
 )
 
 if(WIN32 AND NOT ANDROID)
