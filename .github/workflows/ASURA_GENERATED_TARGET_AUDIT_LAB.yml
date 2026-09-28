@@ -1,0 +1,76 @@
+name: ASURA Generated Target Audit Lab
+
+on:
+  push:
+    branches: [tu01-generated-target-audit-lab]
+    paths:
+      - ".github/workflows/ASURA_GENERATED_TARGET_AUDIT_LAB.yml"
+      - "tools/asura_native_audit.py"
+
+permissions:
+  contents: read
+
+jobs:
+  generated-target-audit:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout lab branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Reconstruct frozen TU01 generated checkpoint
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $payload = Join-Path $env:RUNNER_TEMP "ASURA_TU01_GENERATED.zip"
+          $parts = @("tu01/ASURA_TU01_GENERATED.zip.part01", "tu01/ASURA_TU01_GENERATED.zip.part02")
+          $expected = "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
+
+          $out = [System.IO.File]::Create($payload)
+          try {
+            foreach ($part in $parts) {
+              if (-not (Test-Path $part)) { throw "Missing checkpoint part: $part" }
+              $bytes = [System.IO.File]::ReadAllBytes($part)
+              $out.Write($bytes, 0, $bytes.Length)
+            }
+          } finally {
+            $out.Dispose()
+          }
+
+          $actual = (Get-FileHash $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Frozen generated hash mismatch: $actual" }
+
+          $stage = Join-Path $env:RUNNER_TEMP "generated-stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
+          if (Test-Path "generated/default") { Remove-Item "generated/default" -Recurse -Force }
+          Copy-Item (Join-Path $stage "generated/default") "generated/default" -Recurse -Force
+
+      - name: Run generated constant-flow audit
+        shell: cmd
+        run: python tools\asura_native_audit.py --report out\audit\generated_target_lab.json
+
+      - name: Show indirect candidate summary
+        shell: powershell
+        run: |
+          $r = Get-Content "out/audit/generated_target_lab.json" -Raw | ConvertFrom-Json
+          Write-Host "RESULT: $($r.result)"
+          Write-Host "PROVEN: $($r.indirect_candidates.PROVEN.Count)"
+          Write-Host "HIGH_CONFIDENCE: $($r.indirect_candidates.HIGH_CONFIDENCE.Count)"
+          Write-Host "REVIEW: $($r.indirect_candidates.REVIEW.Count)"
+          Write-Host "REJECT: $($r.indirect_candidates.REJECT.Count)"
+          Write-Host "=== 0x829C9BD0 ==="
+          $r.indirect_candidates.PSObject.Properties | ForEach-Object {
+            $_.Value | Where-Object { $_.address -eq "0x829C9BD0" } | ConvertTo-Json -Depth 8
+          }
+
+      - name: Upload lab report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_GENERATED_TARGET_AUDIT_LAB
+          path: out/audit/generated_target_lab.json
+          if-no-files-found: warn
+          retention-days: 7
