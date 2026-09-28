@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
         std::cerr << "Missing value after " << arg << "\n";
         return false;
       }
-      target = fs::u8path(argv[++i]);
+      target = fs::path(argv[++i]);
       return true;
     };
 
@@ -181,13 +181,13 @@ int main(int argc, char** argv) {
   config.kernel_init = rex::kernel::InitializeKernel;
   config.tool_mode = true;
 
-  const X_STATUS setup = runtime.Setup(std::move(config));
+  const rex::X_STATUS setup = runtime.Setup(std::move(config));
   if (XFAILED(setup)) {
     std::cerr << "ReXGlue tool-mode runtime setup failed: " << Hex32(setup) << "\n";
     return 5;
   }
 
-  const X_STATUS load = runtime.LoadXexImage("game:\\default.xex");
+  const rex::X_STATUS load = runtime.LoadXexImage("game:\\default.xex");
   if (XFAILED(load)) {
     std::cerr << "Base XEX + XEXP load/patch failed: " << Hex32(load) << "\n";
     return 6;
