@@ -1,0 +1,47 @@
+name: ASURA Source Snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_SOURCE_SNAPSHOT.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Package source-only project snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar \
+            --exclude='./.git' \
+            --exclude='./tools/rexglue' \
+            --exclude='./generated' \
+            --exclude='./out' \
+            --exclude='./tu01/ASURA_TU01_GENERATED.zip.part01' \
+            --exclude='./tu01/ASURA_TU01_GENERATED.zip.part02' \
+            -czf out/asura_source_snapshot.tar.gz .
+          echo "Snapshot SHA-256:"
+          sha256sum out/asura_source_snapshot.tar.gz
+          echo "Snapshot contents (top level):"
+          tar -tzf out/asura_source_snapshot.tar.gz | sed -n '1,120p'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_SOURCE_SNAPSHOT
+          path: out/asura_source_snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 7
