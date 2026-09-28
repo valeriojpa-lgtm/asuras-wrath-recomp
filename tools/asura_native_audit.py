@@ -113,6 +113,213 @@ def parse_define(text: str, name: str) -> int | None:
     return parse_int(m.group(1)) if m else None
 
 
+
+def scan_generated_constant_indirects(
+    partitions: list[Path],
+    registrations: dict[int, str],
+    code_base: int | None,
+    code_size: int | None,
+    image_base: int | None,
+    image_size: int | None,
+    audit: Audit,
+) -> dict:
+    """Conservatively report constant values that reach generated CTR dispatch.
+
+    This is deliberately diagnostic-only. Generated C++ is a flattened
+    representation of guest control flow, so even a tracked constant is not
+    strong enough evidence to auto-register a new function. Any ambiguous
+    control-flow boundary clears propagation state.
+    """
+
+    func_re = re.compile(r"\bDEFINE_REX_FUNC\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+    imm_re = re.compile(
+        r"^\s*(?:ctx\.)?r(\d+)\.(?:s64|u64)\s*=\s*(-?\d+)(?:[uUlL]+)?;\s*$"
+    )
+    add_re = re.compile(
+        r"^\s*(?:ctx\.)?r(\d+)\.s64\s*=\s*(?:ctx\.)?r(\d+)\.s64\s*\+\s*(-?\d+);\s*$"
+    )
+    or_re = re.compile(
+        r"^\s*(?:ctx\.)?r(\d+)\.u64\s*=\s*(?:ctx\.)?r(\d+)\.u64\s*\|\s*(\d+)(?:[uUlL]+)?;\s*$"
+    )
+    copy_re = re.compile(
+        r"^\s*(?:ctx\.)?r(\d+)\.u64\s*=\s*(?:ctx\.)?r(\d+)\.u64;\s*$"
+    )
+    ctr_re = re.compile(
+        r"^\s*(?:ctx\.)?ctr\.u64\s*=\s*(?:ctx\.)?r(\d+)\.u64;\s*$"
+    )
+    indirect_ctr_re = re.compile(
+        r"\bREX_CALL_INDIRECT_FUNC\(\s*(?:ctx\.)?ctr\.u32\s*\)"
+    )
+    any_reg_write_re = re.compile(
+        r"^\s*(?:ctx\.)?r(\d+)\.[A-Za-z0-9_]+\s*="
+    )
+    direct_call_re = re.compile(
+        r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*ctx\s*,\s*base\s*\)\s*;\s*$"
+    )
+
+    mask64 = (1 << 64) - 1
+    report = []
+    seen = set()
+    dynamic_sites = 0
+    resolved_constant_sites = 0
+
+    for path in partitions:
+        regs: dict[int, int] = {}
+        ctr: int | None = None
+        current_func: str | None = None
+
+        for line_no, raw_line in enumerate(read_text(path).splitlines(), 1):
+            line = raw_line.strip()
+
+            m = func_re.search(line)
+            if m:
+                current_func = m.group(1)
+                regs.clear()
+                ctr = None
+                continue
+
+            # Labels, gotos and conditionals create path joins that a simple
+            # linear tracker cannot prove safe. Drop all propagated state.
+            if (
+                line.startswith("loc_")
+                or line.startswith("goto ")
+                or line.startswith("if ")
+                or line.startswith("if(")
+                or line.startswith("switch ")
+                or line.startswith("case ")
+                or line.startswith("default:")
+            ):
+                regs.clear()
+                ctr = None
+                continue
+
+            m = imm_re.match(raw_line)
+            if m:
+                regs[int(m.group(1))] = int(m.group(2)) & mask64
+                continue
+
+            m = add_re.match(raw_line)
+            if m:
+                dst, src = int(m.group(1)), int(m.group(2))
+                if src in regs:
+                    regs[dst] = (regs[src] + int(m.group(3))) & mask64
+                else:
+                    regs.pop(dst, None)
+                continue
+
+            m = or_re.match(raw_line)
+            if m:
+                dst, src = int(m.group(1)), int(m.group(2))
+                if src in regs:
+                    regs[dst] = (regs[src] | int(m.group(3))) & mask64
+                else:
+                    regs.pop(dst, None)
+                continue
+
+            m = copy_re.match(raw_line)
+            if m:
+                dst, src = int(m.group(1)), int(m.group(2))
+                if src in regs:
+                    regs[dst] = regs[src]
+                else:
+                    regs.pop(dst, None)
+                continue
+
+            m = ctr_re.match(raw_line)
+            if m:
+                ctr = regs.get(int(m.group(1)))
+                continue
+
+            if "REX_CALL_INDIRECT_FUNC(" in line:
+                dynamic_sites += 1
+                if indirect_ctr_re.search(line) and ctr is not None:
+                    resolved_constant_sites += 1
+                    target = ctr & 0xFFFFFFFF
+                    key = (target, current_func, path.name, line_no)
+                    if key not in seen:
+                        seen.add(key)
+                        item = {
+                            "address": f"0x{target:08X}",
+                            "function": current_func,
+                            "file": path.name,
+                            "line": line_no,
+                        }
+                        report.append(item)
+
+                        if target & 3:
+                            audit.candidate(
+                                "REJECT",
+                                target,
+                                "generated constant flow reached CTR but target is unaligned",
+                                **{k: v for k, v in item.items() if k != "address"},
+                            )
+                        elif target in registrations:
+                            audit.candidate(
+                                "PROVEN",
+                                target,
+                                "generated constant flow confirms an existing registration",
+                                symbol=registrations[target],
+                                **{k: v for k, v in item.items() if k != "address"},
+                            )
+                        elif (
+                            code_base is not None
+                            and code_size is not None
+                            and code_base <= target < code_base + code_size
+                        ):
+                            audit.candidate(
+                                "HIGH_CONFIDENCE",
+                                target,
+                                "generated constant flow reaches CTR inside code range; reporting only",
+                                **{k: v for k, v in item.items() if k != "address"},
+                            )
+                        elif (
+                            image_base is not None
+                            and image_size is not None
+                            and image_base <= target < image_base + image_size
+                        ):
+                            audit.candidate(
+                                "REVIEW",
+                                target,
+                                "generated constant flow reaches an in-image address outside generated code range",
+                                **{k: v for k, v in item.items() if k != "address"},
+                            )
+                        else:
+                            audit.candidate(
+                                "REJECT",
+                                target,
+                                "generated constant flow reaches an address outside the guest image",
+                                **{k: v for k, v in item.items() if k != "address"},
+                            )
+
+                # Calls may mutate context state; never propagate across them.
+                regs.clear()
+                ctr = None
+                continue
+
+            # Any other write to a tracked GPR invalidates that register.
+            m = any_reg_write_re.match(raw_line)
+            if m:
+                regs.pop(int(m.group(1)), None)
+
+            # Direct calls may mutate context registers. They are a hard state
+            # boundary for this diagnostic pass.
+            if direct_call_re.match(raw_line):
+                regs.clear()
+                ctr = None
+
+    audit.info(
+        "indirect.generated-flow",
+        "generated C++ constant-flow scan completed; unregistered results are reporting-only",
+        dynamic_sites=dynamic_sites,
+        resolved_constant_sites=resolved_constant_sites,
+        unique_constant_targets=len({x["address"] for x in report}),
+    )
+    return {
+        "dynamic_sites": dynamic_sites,
+        "resolved_constant_sites": resolved_constant_sites,
+        "candidates": report,
+    }
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project-root", default=".")
@@ -489,6 +696,16 @@ def main() -> int:
         else:
             audit.candidate("REVIEW", addr, "literal indirect target is in code range but unregistered")
 
+    generated_flow = scan_generated_constant_indirects(
+        partitions,
+        registrations,
+        code_base,
+        code_size,
+        image_base,
+        image_size,
+        audit,
+    )
+
     for addr in sorted(KNOWN_REVIEW_TARGETS):
         if addr in registrations:
             audit.candidate(
@@ -539,6 +756,10 @@ def main() -> int:
         "mapping_count": len(mappings),
         "direct_call_symbol_count": len(direct_calls),
         "literal_indirect_target_count": len(set(indirect_literals)),
+        "generated_constant_indirect_count": generated_flow["resolved_constant_sites"],
+        "generated_constant_unique_target_count": len(
+            {x["address"] for x in generated_flow["candidates"]}
+        ),
         "bounds": bounds,
     }
     write_report(audit, report_path, root, generated, metadata)
