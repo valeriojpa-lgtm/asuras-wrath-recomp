@@ -27,11 +27,26 @@ jobs:
       - name: Install verified TU01 generated source
         shell: powershell
         run: |
-          $payload = "tu01/ASURA_TU01_GENERATED.zip"
+          $payload = Join-Path $env:RUNNER_TEMP "ASURA_TU01_GENERATED.zip"
+          $part1 = "tu01/ASURA_TU01_GENERATED.zip.part01"
+          $part2 = "tu01/ASURA_TU01_GENERATED.zip.part02"
           $expected = "29c9213ee11318b119dee60335b1dfe81f3dee740063c754b7967ac8c311b91a"
 
-          if (-not (Test-Path $payload)) {
-            throw "Missing TU01 payload: $payload"
+          foreach ($part in @($part1, $part2)) {
+            if (-not (Test-Path $part)) {
+              throw "Missing TU01 payload part: $part"
+            }
+          }
+
+          $out = [System.IO.File]::Create($payload)
+          try {
+            foreach ($part in @($part1, $part2)) {
+              $bytes = [System.IO.File]::ReadAllBytes($part)
+              $out.Write($bytes, 0, $bytes.Length)
+            }
+          }
+          finally {
+            $out.Dispose()
           }
 
           $actual = (Get-FileHash $payload -Algorithm SHA256).Hash.ToLowerInvariant()
