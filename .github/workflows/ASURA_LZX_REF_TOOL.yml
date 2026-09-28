@@ -1,0 +1,53 @@
+name: ASURA LZX Reference Tool
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tu01-native-build]
+    paths:
+      - ".github/workflows/ASURA_LZX_REF_TOOL.yml"
+      - "tools/asura_lzx_ref.cpp"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asura-lzx-ref-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ReXGlue submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build tiny LZX reference decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSPACK="tools/rexglue/thirdparty/libmspack/libmspack/mspack"
+          test -f "$MSPACK/lzxd.c"
+          test -f "$MSPACK/lzx.h"
+          test -f "$MSPACK/mspack.h"
+
+          mkdir -p out/lzx-ref
+          clang -O2 -fPIC -I"$MSPACK" -c "$MSPACK/lzxd.c" -o out/lzx-ref/lzxd.o
+          clang++ -O2 -std=c++17 -I"$MSPACK"             tools/asura_lzx_ref.cpp out/lzx-ref/lzxd.o             -o out/lzx-ref/asura_lzx_ref
+
+          chmod +x out/lzx-ref/asura_lzx_ref
+          file out/lzx-ref/asura_lzx_ref
+          ldd out/lzx-ref/asura_lzx_ref || true
+
+      - name: Upload decoder
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURA_LZX_REF_LINUX
+          path: out/lzx-ref/asura_lzx_ref
+          if-no-files-found: error
+          retention-days: 7
