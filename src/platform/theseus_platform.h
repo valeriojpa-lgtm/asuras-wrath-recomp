@@ -6,9 +6,11 @@
 #include <optional>
 #include <string_view>
 
+#include "platform/theseus_filesystem.h"
+
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T02-native-paths-config";
+inline constexpr std::string_view kMilestone = "T03-native-filesystem";
 
 enum class Backend {
   kReXGlue,
@@ -50,6 +52,7 @@ class Platform final {
   // Idempotent. Establishes the portable PC-side boundary and resolves the
   // canonical/sibling Data layout without depending on the runtime backend.
   bool Bootstrap(const std::filesystem::path& executable_root);
+  bool BootstrapFromProcess();
 
   [[nodiscard]] std::optional<std::filesystem::path> ResolveGameDataRoot(
       const std::filesystem::path& preferred = {},
@@ -57,12 +60,15 @@ class Platform final {
 
   [[nodiscard]] bool initialized() const noexcept { return initialized_; }
   [[nodiscard]] const PortablePaths& paths() const noexcept { return paths_; }
+  [[nodiscard]] NativeFileSystem& files() noexcept { return files_; }
+  [[nodiscard]] const NativeFileSystem& files() const noexcept { return files_; }
   [[nodiscard]] Backend backend(Service service) const noexcept;
 
  private:
   Platform();
 
   PortablePaths paths_{};
+  NativeFileSystem files_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
   bool initialized_ = false;
 };
