@@ -3,11 +3,12 @@
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T01-platform-bootstrap";
+inline constexpr std::string_view kMilestone = "T02-native-paths-config";
 
 enum class Backend {
   kReXGlue,
@@ -46,9 +47,13 @@ class Platform final {
  public:
   static Platform& Instance();
 
-  // Idempotent. T01 only establishes the portable PC-side boundary; all game
-  // services still use their existing ReXGlue implementation.
+  // Idempotent. Establishes the portable PC-side boundary and resolves the
+  // canonical/sibling Data layout without depending on the runtime backend.
   bool Bootstrap(const std::filesystem::path& executable_root);
+
+  [[nodiscard]] std::optional<std::filesystem::path> ResolveGameDataRoot(
+      const std::filesystem::path& preferred = {},
+      const std::filesystem::path& working_directory = {}) const;
 
   [[nodiscard]] bool initialized() const noexcept { return initialized_; }
   [[nodiscard]] const PortablePaths& paths() const noexcept { return paths_; }
