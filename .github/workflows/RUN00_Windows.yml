@@ -70,6 +70,15 @@ jobs:
           }
           Copy-Item $generated "generated/default" -Recurse -Force
 
+          # ZIP archives preserve host timestamps. If any extracted generated
+          # source is slightly ahead of the GitHub runner clock, Ninja can
+          # repeatedly consider build.ninja dirty and abort after 100 retries.
+          # Normalize generated-source mtimes before CMake/Ninja see them.
+          $stamp = (Get-Date).ToUniversalTime().AddMinutes(-2)
+          Get-ChildItem "generated/default" -Recurse -File | ForEach-Object {
+            $_.LastWriteTimeUtc = $stamp
+          }
+
           $cppCount = (Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp").Count
           if ($cppCount -ne 207) {
             throw "Unexpected TU01 partition count: $cppCount (expected 207)"
@@ -92,6 +101,7 @@ jobs:
       - name: Build and package TU01
         shell: cmd
         run: |
+          if exist out\build\win-amd64-release rmdir /s /q out\build\win-amd64-release
           cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
           if errorlevel 1 exit /b %errorlevel%
           cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
