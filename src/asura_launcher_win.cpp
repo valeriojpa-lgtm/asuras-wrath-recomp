@@ -34,6 +34,10 @@ enum ControlId : int {
   kAdapter,
   kVsync,
   kAsyncShaders,
+  kRenderScale,
+  kAnisotropic,
+  kMsaa,
+  kFxaa,
   kMnk,
   kInputBackend,
   kLanguage,
@@ -89,6 +93,10 @@ struct LauncherSettings {
   int adapter = -1;       // -1 = highest dedicated-memory DXGI adapter
   bool vsync = false;
   bool async_shaders = false;
+  int render_scale = 1;    // 1 native, 2-4 internal resolution scale
+  int anisotropic = 5;     // -1 original, 0 off, 1/2/3/4/5 = 1x/2x/4x/8x/16x
+  bool native_2x_msaa = true;
+  int fxaa = 0;            // 0 off, 1 FXAA, 2 FXAA Extreme
   bool mnk = true;
   int input_backend = 0;  // 0 SDL, 1 XInput
   int language = 1;
@@ -206,6 +214,10 @@ LauncherSettings LoadSettings(const std::filesystem::path& path) {
   s.adapter = ReadInt(path, L"Adapter", s.adapter);
   s.vsync = ReadBool(path, L"VSync", s.vsync);
   s.async_shaders = ReadBool(path, L"AsyncShaders", s.async_shaders);
+  s.render_scale = std::clamp(ReadInt(path, L"RenderScale", s.render_scale), 1, 4);
+  s.anisotropic = std::clamp(ReadInt(path, L"Anisotropic", s.anisotropic), -1, 5);
+  s.native_2x_msaa = ReadBool(path, L"Native2xMSAA", s.native_2x_msaa);
+  s.fxaa = std::clamp(ReadInt(path, L"FXAA", s.fxaa), 0, 2);
   s.mnk = ReadBool(path, L"KeyboardMouse", s.mnk);
   s.input_backend = ReadInt(path, L"InputBackend", s.input_backend);
   s.language = ReadInt(path, L"Language", s.language);
@@ -232,6 +244,10 @@ void SaveSettings(const std::filesystem::path& path, const LauncherSettings& s) 
   WriteInt(path, L"Adapter", s.adapter);
   WriteBool(path, L"VSync", s.vsync);
   WriteBool(path, L"AsyncShaders", s.async_shaders);
+  WriteInt(path, L"RenderScale", s.render_scale);
+  WriteInt(path, L"Anisotropic", s.anisotropic);
+  WriteBool(path, L"Native2xMSAA", s.native_2x_msaa);
+  WriteInt(path, L"FXAA", s.fxaa);
   WriteBool(path, L"KeyboardMouse", s.mnk);
   WriteInt(path, L"InputBackend", s.input_backend);
   WriteInt(path, L"Language", s.language);
@@ -255,8 +271,10 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
   static constexpr std::string_view prefixes[] = {
       "--window_width=", "--window_height=", "--fullscreen=",
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
-      "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
-      "--input_backend=", "--user_language=", "--user_country=",
+      "--async_shader_compilation=", "--resolution_scale=",
+      "--anisotropic_override=", "--native_2x_msaa=", "--swap_post_effect=",
+      "--mnk_mode=", "--mnk_mouse=", "--input_backend=",
+      "--user_language=", "--user_country=",
   };
   std::erase_if(args, [](const std::string& arg) {
     for (const auto prefix : prefixes) {
@@ -298,6 +316,11 @@ void AppendSettingsArgs(std::vector<std::string>& args,
 
   add_bool("vsync", s.vsync);
   add_bool("async_shader_compilation", s.async_shaders);
+  add_int("resolution_scale", s.render_scale);
+  add_int("anisotropic_override", s.anisotropic);
+  add_bool("native_2x_msaa", s.native_2x_msaa);
+  add_string("swap_post_effect",
+             s.fxaa == 2 ? "fxaa_extreme" : (s.fxaa == 1 ? "fxaa" : "none"));
   add_bool("mnk_mode", s.mnk);
   add_bool("mnk_mouse", false);
   add_string("input_backend", s.input_backend == 1 ? "xinput" : "sdl");
@@ -361,6 +384,10 @@ struct LauncherState {
   HWND adapter = nullptr;
   HWND vsync = nullptr;
   HWND async_shaders = nullptr;
+  HWND render_scale = nullptr;
+  HWND anisotropic = nullptr;
+  HWND msaa = nullptr;
+  HWND fxaa = nullptr;
   HWND mnk = nullptr;
   HWND input_backend = nullptr;
   HWND language = nullptr;
@@ -450,30 +477,61 @@ struct LauncherState {
     async_shaders = CreateCheck(hwnd, font, kAsyncShaders,
                                 L"Async shader compilation", 250, 250, 250, 26);
 
-    CreateLabel(hwnd, font, L"INPUT", 28, 298, 180, 22);
+    CreateLabel(hwnd, font, L"Render resolution", 42, 292, 145, 24);
+    render_scale = CreateCombo(hwnd, font, kRenderScale, 195, 288, 280, 180);
+    for (const wchar_t* option : {L"Native", L"2x", L"3x", L"4x"}) {
+      SendMessageW(render_scale, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(option));
+    }
+
+    CreateLabel(hwnd, font, L"Anisotropic filter", 42, 330, 145, 24);
+    anisotropic = CreateCombo(hwnd, font, kAnisotropic, 195, 326, 280, 240);
+    for (const wchar_t* option :
+         {L"Original (game)", L"Off", L"1x", L"2x", L"4x", L"8x", L"16x"}) {
+      SendMessageW(anisotropic, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(option));
+    }
+
+    CreateLabel(hwnd, font, L"MSAA", 42, 368, 145, 24);
+    msaa = CreateCombo(hwnd, font, kMsaa, 195, 364, 280, 140);
+    SendMessageW(msaa, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"Native 2x (recommended)"));
+    SendMessageW(msaa, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"Emulated 2x (compatibility)"));
+
+    CreateLabel(hwnd, font, L"FXAA", 42, 406, 145, 24);
+    fxaa = CreateCombo(hwnd, font, kFxaa, 195, 402, 280, 160);
+    SendMessageW(fxaa, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"Off"));
+    SendMessageW(fxaa, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"FXAA"));
+    SendMessageW(fxaa, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"FXAA Extreme"));
+
+    CreateLabel(hwnd, font, L"INPUT", 28, 454, 180, 22);
     mnk = CreateCheck(hwnd, font, kMnk, L"Keyboard / mouse controls",
-                      42, 330, 230, 26);
-    CreateLabel(hwnd, font, L"Controller backend", 330, 332, 145, 24);
-    input_backend = CreateCombo(hwnd, font, kInputBackend, 480, 328, 185, 120);
+                      42, 486, 230, 26);
+    CreateLabel(hwnd, font, L"Controller backend", 330, 488, 145, 24);
+    input_backend = CreateCombo(hwnd, font, kInputBackend, 480, 484, 185, 120);
     SendMessageW(input_backend, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"SDL"));
     SendMessageW(input_backend, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"XInput"));
 
-    CreateLabel(hwnd, font, L"LANGUAGE", 28, 378, 180, 22);
-    CreateLabel(hwnd, font, L"Game language", 42, 412, 145, 24);
-    language = CreateCombo(hwnd, font, kLanguage, 195, 408, 280, 220);
+    CreateLabel(hwnd, font, L"LANGUAGE", 28, 534, 180, 22);
+    CreateLabel(hwnd, font, L"Game language", 42, 568, 145, 24);
+    language = CreateCombo(hwnd, font, kLanguage, 195, 564, 280, 220);
     for (const auto& option : kLanguages) {
       SendMessageW(language, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(option.label));
     }
     show_at_startup = CreateCheck(
         hwnd, font, kShowAtStartup, L"Show this launcher at startup",
-        500, 408, 220, 26);
+        500, 564, 220, 26);
 
-    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 470, 110, 34);
-    CreateButton(hwnd, font, kExit, L"Exit", 520, 470, 90, 34);
-    CreateButton(hwnd, font, kPlay, L"Play", 620, 470, 110, 34, true);
+    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 626, 110, 34);
+    CreateButton(hwnd, font, kExit, L"Exit", 520, 626, 90, 34);
+    CreateButton(hwnd, font, kPlay, L"Play", 620, 626, 110, 34, true);
 
     ApplySettingsToControls();
   }
@@ -486,6 +544,11 @@ struct LauncherState {
     SendMessageW(adapter, CB_SETCURSEL, FindAdapterComboIndex(settings.adapter), 0);
     SetCheck(vsync, settings.vsync);
     SetCheck(async_shaders, settings.async_shaders);
+    SendMessageW(render_scale, CB_SETCURSEL, std::clamp(settings.render_scale, 1, 4) - 1, 0);
+    const int aniso_index = settings.anisotropic < 0 ? 0 : settings.anisotropic + 1;
+    SendMessageW(anisotropic, CB_SETCURSEL, std::clamp(aniso_index, 0, 6), 0);
+    SendMessageW(msaa, CB_SETCURSEL, settings.native_2x_msaa ? 0 : 1, 0);
+    SendMessageW(fxaa, CB_SETCURSEL, std::clamp(settings.fxaa, 0, 2), 0);
     SetCheck(mnk, settings.mnk);
     SendMessageW(input_backend, CB_SETCURSEL,
                  std::clamp(settings.input_backend, 0, 1), 0);
@@ -518,6 +581,14 @@ struct LauncherState {
 
     settings.vsync = GetCheck(vsync);
     settings.async_shaders = GetCheck(async_shaders);
+    settings.render_scale =
+        std::clamp(static_cast<int>(SendMessageW(render_scale, CB_GETCURSEL, 0, 0)), 0, 3) + 1;
+    const int aniso_index =
+        std::clamp(static_cast<int>(SendMessageW(anisotropic, CB_GETCURSEL, 0, 0)), 0, 6);
+    settings.anisotropic = aniso_index == 0 ? -1 : aniso_index - 1;
+    settings.native_2x_msaa = SendMessageW(msaa, CB_GETCURSEL, 0, 0) != 1;
+    settings.fxaa =
+        std::clamp(static_cast<int>(SendMessageW(fxaa, CB_GETCURSEL, 0, 0)), 0, 2);
     settings.mnk = GetCheck(mnk);
     settings.input_backend =
         std::clamp(static_cast<int>(SendMessageW(input_backend, CB_GETCURSEL, 0, 0)), 0, 1);
@@ -620,7 +691,7 @@ bool ShowLauncher(LauncherState& state) {
   RegisterClassExW(&wc);
 
   constexpr int width = 780;
-  constexpr int height = 565;
+  constexpr int height = 720;
   RECT rect{0, 0, width, height};
   AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                      FALSE, 0);

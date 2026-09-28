@@ -1,4 +1,4 @@
-name: RUN 04 - Native Launcher + Language + Icon
+name: RUN 05 - Graphics Quality Launcher
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
           clang --version
           ninja --version
 
-      - name: Build and package RUN 04
+      - name: Build and package RUN 05
         shell: cmd
         run: |
           cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
@@ -62,15 +62,15 @@ jobs:
           Get-ChildItem -Recurse out\dist
           $zip = Get-ChildItem out\dist\*.zip | Select-Object -First 1
           if (-not $zip) {
-            throw "RUN 04 package ZIP was not created."
+            throw "RUN 05 package ZIP was not created."
           }
           Write-Host "Package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
-      - name: Upload RUN 04 artifact
+      - name: Upload RUN 05 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_NATIVE_LAUNCHER
+          name: ASURAS_WRATH_GRAPHICS_LAUNCHER
           path: out/dist/*.zip
           if-no-files-found: error
           retention-days: 30
