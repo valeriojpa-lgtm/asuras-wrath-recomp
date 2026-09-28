@@ -349,3 +349,314 @@ new_xgetlanguage = """u32 XGetLanguage_entry() {
 
 patch_once(xam_info, old_xgetlanguage, new_xgetlanguage,
            "XGetLanguage user language support")
+
+
+# 7) Theseus T04 save/profile bridge. Physical save policy is owned by the
+# project-side NativeSaveSystem; ReXGlue keeps only the temporary Xbox XAM ABI.
+runtime_cpp = Path("tools/rexglue/src/system/runtime.cpp")
+old_runtime_save_cvars = """REXCVAR_DEFINE_STRING(game_data_root, "", "Runtime", "Override game data path");
+REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
+REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
+REXCVAR_DEFINE_STRING(cache_root, "", "Runtime", "Override shader cache path");
+REXCVAR_DEFINE_STRING(metadata_root, "", "Runtime", "Override metadata path");"""
+
+new_runtime_save_cvars = """REXCVAR_DEFINE_STRING(game_data_root, "", "Runtime", "Override game data path");
+REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
+REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
+REXCVAR_DEFINE_STRING(cache_root, "", "Runtime", "Override shader cache path");
+REXCVAR_DEFINE_STRING(metadata_root, "", "Runtime", "Override metadata path");
+REXCVAR_DEFINE_STRING(save_data_root, "", "Runtime", "Override XAM saved-game/profile root");
+REXCVAR_DEFINE_STRING(user_profile_name, "User", "Runtime", "Compatibility profile name");
+REXCVAR_DEFINE_STRING(user_profile_xuid, "", "Runtime", "Compatibility profile XUID");"""
+
+patch_once(runtime_cpp, old_runtime_save_cvars, new_runtime_save_cvars,
+           "T04 save/profile runtime cvars")
+
+runtime_h = Path("tools/rexglue/include/rex/runtime.h")
+old_runtime_save_decl = """REXCVAR_DECLARE(std::string, cache_root);
+REXCVAR_DECLARE(std::string, metadata_root);"""
+
+new_runtime_save_decl = """REXCVAR_DECLARE(std::string, cache_root);
+REXCVAR_DECLARE(std::string, metadata_root);
+REXCVAR_DECLARE(std::string, save_data_root);"""
+
+patch_once(runtime_h, old_runtime_save_decl, new_runtime_save_decl,
+           "T04 save root declaration")
+
+
+# Keep Marketplace/DLC content on the existing ReXGlue content root, while
+# moving only SavedGame packages and title-profile settings to Theseus Saves.
+content_h = Path("tools/rexglue/include/rex/system/xam/content_manager.h")
+old_content_ctor_h = """  ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path);
+  ~ContentManager();"""
+
+new_content_ctor_h = """  ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path,
+                 const std::filesystem::path& save_root_path = {});
+  ~ContentManager();"""
+
+patch_once(content_h, old_content_ctor_h, new_content_ctor_h,
+           "T04 ContentManager save-root constructor")
+
+old_content_member_h = """  KernelState* kernel_state_;
+  std::filesystem::path root_path_;
+
+  // TODO(benvanik): remove use of global lock, it's bad here!"""
+
+new_content_member_h = """  KernelState* kernel_state_;
+  std::filesystem::path root_path_;
+  std::filesystem::path save_root_path_;
+
+  // TODO(benvanik): remove use of global lock, it's bad here!"""
+
+patch_once(content_h, old_content_member_h, new_content_member_h,
+           "T04 ContentManager save-root member")
+
+content_cpp = Path("tools/rexglue/src/system/xam/content_manager.cpp")
+old_content_ctor = """ContentManager::ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path)
+    : kernel_state_(kernel_state), root_path_(root_path) {}"""
+
+new_content_ctor = """ContentManager::ContentManager(KernelState* kernel_state,
+                               const std::filesystem::path& root_path,
+                               const std::filesystem::path& save_root_path)
+    : kernel_state_(kernel_state),
+      root_path_(root_path),
+      save_root_path_(save_root_path.empty() ? root_path : save_root_path) {}"""
+
+patch_once(content_cpp, old_content_ctor, new_content_ctor,
+           "T04 ContentManager native save root")
+
+old_package_root = """  // Package root path:
+  // content_root/xuid/title_id/content_type/
+  return root_path_ / xuid_str / title_id_str / content_type_str;"""
+
+new_package_root = """  // Saved games belong to the Theseus native save root. Marketplace/DLC and
+  // other XAM content keep using the legacy content root until their own
+  // migration milestone.
+  const auto& base_root =
+      content_type == XContentType::kSavedGame ? save_root_path_ : root_path_;
+
+  // Package root path:
+  // selected_root/xuid/title_id/content_type/
+  return base_root / xuid_str / title_id_str / content_type_str;"""
+
+patch_once(content_cpp, old_package_root, new_package_root,
+           "T04 SavedGame package root")
+
+old_header_root = """  // Header root path:
+  // content_root/xuid/title_id/Headers/content_type/filename.header
+  return root_path_ / xuid_str / title_id_str / kGameContentHeaderDirName / content_type_str /
+         final_name;"""
+
+new_header_root = """  const auto& base_root =
+      content_type == XContentType::kSavedGame ? save_root_path_ : root_path_;
+
+  // Header root path:
+  // selected_root/xuid/title_id/Headers/content_type/filename.header
+  return base_root / xuid_str / title_id_str / kGameContentHeaderDirName / content_type_str /
+         final_name;"""
+
+patch_once(content_cpp, old_header_root, new_header_root,
+           "T04 SavedGame header root")
+
+old_profile_root = """  // Per-game per-profile data location:
+  // content_root/title_id/profile/user_name
+  return root_path_ / title_id / kGameUserContentDirName / user_name;"""
+
+new_profile_root = """  // Per-game per-profile data is save state too, so keep it under the native
+  // Theseus Saves root alongside SavedGame packages.
+  // save_root/title_id/profile/user_name
+  return save_root_path_ / title_id / kGameUserContentDirName / user_name;"""
+
+patch_once(content_cpp, old_profile_root, new_profile_root,
+           "T04 title profile settings root")
+
+
+kernel_state = Path("tools/rexglue/src/system/kernel_state.cpp")
+old_content_manager_init = """  auto user_data_root = emulator_->user_data_root();
+  if (!user_data_root.empty()) {
+    user_data_root = std::filesystem::absolute(user_data_root);
+  }
+  content_manager_ = std::make_unique<xam::ContentManager>(this, user_data_root);"""
+
+new_content_manager_init = """  auto user_data_root = emulator_->user_data_root();
+  if (!user_data_root.empty()) {
+    user_data_root = std::filesystem::absolute(user_data_root);
+  }
+
+  std::filesystem::path save_root;
+  const auto save_root_arg = REXCVAR_GET(save_data_root);
+  if (!save_root_arg.empty()) {
+    save_root = rex::to_path(save_root_arg);
+    save_root = std::filesystem::absolute(save_root);
+  } else {
+    save_root = user_data_root / "Saves";
+  }
+
+  content_manager_ =
+      std::make_unique<xam::ContentManager>(this, user_data_root, save_root);"""
+
+patch_once(kernel_state, old_content_manager_init, new_content_manager_init,
+           "T04 ContentManager Theseus save root")
+
+
+# Compatibility profile identity comes from Theseus. Defaults intentionally
+# preserve the pre-T04 ReXGlue identity for existing save compatibility.
+profile_cpp = Path("tools/rexglue/src/system/xam/user_profile.cpp")
+old_profile_include = """#include <fmt/format.h>
+
+#include <rex/logging.h>"""
+
+new_profile_include = """#include <fmt/format.h>
+
+#include <rex/cvar.h>
+#include <rex/logging.h>"""
+
+patch_once(profile_cpp, old_profile_include, new_profile_include,
+           "T04 profile cvar include")
+
+old_profile_namespace = """namespace rex {
+namespace system {
+namespace xam {
+
+UserProfile::UserProfile() {"""
+
+new_profile_namespace = """REXCVAR_DECLARE(std::string, user_profile_name);
+REXCVAR_DECLARE(std::string, user_profile_xuid);
+
+namespace rex {
+namespace system {
+namespace xam {
+
+UserProfile::UserProfile() {"""
+
+patch_once(profile_cpp, old_profile_namespace, new_profile_namespace,
+           "T04 profile cvar declarations")
+
+old_profile_identity = """  xuid_ = 0xB13EBABEBABEBABE;
+  name_ = "User";
+
+  // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195"""
+
+new_profile_identity = """  xuid_ = 0xB13EBABEBABEBABE;
+  name_ = "User";
+
+  const auto configured_name = REXCVAR_GET(user_profile_name);
+  if (!configured_name.empty()) {
+    name_ = configured_name;
+  }
+
+  const auto configured_xuid = REXCVAR_GET(user_profile_xuid);
+  if (!configured_xuid.empty()) {
+    try {
+      xuid_ = std::stoull(configured_xuid, nullptr, 0);
+    } catch (...) {
+      REXSYS_WARN("Invalid user_profile_xuid '{}'; preserving compatibility XUID",
+                  configured_xuid);
+    }
+  }
+
+  // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195"""
+
+patch_once(profile_cpp, old_profile_identity, new_profile_identity,
+           "T04 Theseus profile identity")
+
+
+# Detect the precise first-run condition: the game enumerates SavedGame content
+# and gets zero items. This flag is consumed only by the next 2-button message.
+xam_content = Path("tools/rexglue/src/kernel/xam/xam_content.cpp")
+old_content_atomic_include = """#include <rex/cvar.h>
+#include <rex/kernel/xam/private.h>"""
+
+new_content_atomic_include = """#include <atomic>
+
+#include <rex/cvar.h>
+#include <rex/kernel/xam/private.h>"""
+
+patch_once(xam_content, old_content_atomic_include, new_content_atomic_include,
+           "T04 first-run atomic include")
+
+old_content_namespace = """namespace rex {
+namespace kernel {
+namespace xam {
+using namespace rex::system;
+using namespace rex::system::xam;"""
+
+new_content_namespace = """namespace rex {
+namespace kernel {
+namespace xam {
+using namespace rex::system;
+using namespace rex::system::xam;
+
+std::atomic_bool g_asura_missing_saved_game{false};"""
+
+patch_once(xam_content, old_content_namespace, new_content_namespace,
+           "T04 first-run save state")
+
+old_enumerator_tail = """  REXKRNL_DEBUG("XamContentCreateEnumerator: added {} items to enumerator", e->item_count());
+
+  *handle_out = e->handle();"""
+
+new_enumerator_tail = """  REXKRNL_DEBUG("XamContentCreateEnumerator: added {} items to enumerator", e->item_count());
+
+  if (uint32_t(content_type) == uint32_t(XContentType::kSavedGame)) {
+    g_asura_missing_saved_game.store(e->item_count() == 0,
+                                     std::memory_order_release);
+  }
+
+  *handle_out = e->handle();"""
+
+patch_once(xam_content, old_enumerator_tail, new_enumerator_tail,
+           "T04 first-run SavedGame detection")
+
+
+xam_ui = Path("tools/rexglue/src/kernel/xam/xam_ui.cpp")
+old_ui_atomic_include = """#include <rex/logging.h>
+#include <rex/runtime.h>"""
+
+new_ui_atomic_include = """#include <atomic>
+
+#include <rex/logging.h>
+#include <rex/runtime.h>"""
+
+patch_once(xam_ui, old_ui_atomic_include, new_ui_atomic_include,
+           "T04 auto-save prompt atomic include")
+
+old_headless_cvar = """REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
+                    "Don't display any UI, using defaults for prompts as needed");"""
+
+new_headless_cvar = """REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
+                    "Don't display any UI, using defaults for prompts as needed");
+REXCVAR_DEFINE_BOOL(asura_auto_first_save_prompt, true, "Theseus",
+                    "Automatically confirm Asura's first-run save creation prompt");"""
+
+patch_once(xam_ui, old_headless_cvar, new_headless_cvar,
+           "T04 auto first-save prompt cvar")
+
+old_ui_dialog_extern = """extern std::atomic<int> xam_dialogs_shown_;"""
+
+new_ui_dialog_extern = """extern std::atomic<int> xam_dialogs_shown_;
+extern std::atomic_bool g_asura_missing_saved_game;"""
+
+patch_once(xam_ui, old_ui_dialog_extern, new_ui_dialog_extern,
+           "T04 first-run save extern")
+
+old_message_result = """  X_RESULT result;
+  if (REXCVAR_GET(headless)) {"""
+
+new_message_result = """  // Project-specific PC polish: only auto-confirm when SavedGame enumeration
+  // has just proven there is no save and this is a two-button prompt. The flag
+  // is one-shot, so unrelated message boxes keep their normal UI.
+  if (REXCVAR_GET(asura_auto_first_save_prompt) && button_count == 2 &&
+      g_asura_missing_saved_game.exchange(false, std::memory_order_acq_rel)) {
+    auto run = [result_ptr]() -> X_RESULT {
+      *result_ptr = 0;  // first button: affirmative in Asura's creation prompt
+      return X_ERROR_SUCCESS;
+    };
+    return xeXamDispatchHeadless(run, overlapped.guest_address());
+  }
+
+  X_RESULT result;
+  if (REXCVAR_GET(headless)) {"""
+
+patch_once(xam_ui, old_message_result, new_message_result,
+           "T04 auto-confirm first save creation")
