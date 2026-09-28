@@ -17,6 +17,7 @@
 #include <rex/rex_app.h>
 #include <rex/system.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/user_module.h>
 #include <rex/system/xmodule.h>
 
 #if defined(__ANDROID__)
