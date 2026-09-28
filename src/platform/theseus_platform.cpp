@@ -1,5 +1,7 @@
 #include "platform/theseus_platform.h"
 
+#include <algorithm>
+#include <cctype>
 #include <system_error>
 
 namespace theseus {
@@ -14,6 +16,63 @@ std::filesystem::path NormalizeRoot(const std::filesystem::path& root) {
 void CreateDirectoryBestEffort(const std::filesystem::path& path) {
   std::error_code ec;
   std::filesystem::create_directories(path, ec);
+}
+
+bool IsDiscImage(const std::filesystem::path& path) {
+  if (!std::filesystem::is_regular_file(path)) {
+    return false;
+  }
+  auto ext = path.extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return ext == ".iso" || ext == ".gdfx";
+}
+
+std::optional<std::filesystem::path> ResolveCandidate(
+    const std::filesystem::path& candidate) {
+  if (candidate.empty()) {
+    return std::nullopt;
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(candidate, ec)) {
+    return std::nullopt;
+  }
+
+  if (IsDiscImage(candidate)) {
+    return candidate;
+  }
+
+  if (!std::filesystem::is_directory(candidate, ec)) {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path direct_candidates[] = {
+      candidate,
+      candidate / "Data",
+      candidate / "BCGame",
+      candidate / "Data" / "BCGame",
+      candidate / "extracted",
+      candidate / "extracted" / "BCGame",
+      candidate / "game_data",
+  };
+
+  for (const auto& dir : direct_candidates) {
+    ec.clear();
+    if (std::filesystem::is_regular_file(dir / "default.xex", ec)) {
+      return dir;
+    }
+  }
+
+  std::filesystem::directory_iterator end;
+  for (std::filesystem::directory_iterator it(candidate, ec);
+       !ec && it != end; it.increment(ec)) {
+    if (it->is_regular_file(ec) && IsDiscImage(it->path())) {
+      return it->path();
+    }
+  }
+
+  return std::nullopt;
 }
 
 }  // namespace
@@ -35,7 +94,25 @@ bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
   }
 
   paths_.root = NormalizeRoot(executable_root);
-  paths_.data = paths_.root / "Data";
+
+  // Canonical release layout is Root/Data. Development/test packages are
+  // allowed to live in Root/THESEUS_Txx next to a shared parent Data folder.
+  const auto local_data = paths_.root / "Data";
+  const auto sibling_data = paths_.root.parent_path() / "Data";
+  std::error_code ec;
+  if (std::filesystem::is_regular_file(local_data / "default.xex", ec) ||
+      std::filesystem::is_directory(local_data / "Game", ec)) {
+    paths_.data = local_data;
+  } else {
+    ec.clear();
+    if (std::filesystem::is_regular_file(sibling_data / "default.xex", ec) ||
+        std::filesystem::is_directory(sibling_data / "Game", ec)) {
+      paths_.data = sibling_data;
+    } else {
+      paths_.data = local_data;
+    }
+  }
+
   paths_.game = paths_.data / "Game";
   paths_.content = paths_.game / "Content";
   paths_.cinematics = paths_.game / "Cinematics";
@@ -43,8 +120,8 @@ bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
   paths_.dlc = paths_.root / "DLC";
   paths_.runtime = paths_.root / "Runtime";
 
-  // Keep RUN04's existing portable location and cache spelling so T01 does
-  // not intentionally alter runtime behavior.
+  // Keep the runtime data local to this executable package. Test builds can
+  // therefore share immutable game data while retaining isolated user state.
   paths_.user_data = paths_.root / "UserData";
   paths_.cache = paths_.user_data / "cache";
 
@@ -63,6 +140,28 @@ bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
 
   initialized_ = true;
   return true;
+}
+
+std::optional<std::filesystem::path> Platform::ResolveGameDataRoot(
+    const std::filesystem::path& preferred,
+    const std::filesystem::path& working_directory) const {
+  const std::filesystem::path candidates[] = {
+      preferred,
+      paths_.data,
+      paths_.root / "Data",
+      paths_.root,
+      paths_.root.parent_path() / "Data",
+      paths_.root.parent_path(),
+      paths_.user_data,
+      working_directory,
+  };
+
+  for (const auto& candidate : candidates) {
+    if (auto resolved = ResolveCandidate(candidate)) {
+      return NormalizeRoot(*resolved);
+    }
+  }
+  return std::nullopt;
 }
 
 Backend Platform::backend(Service service) const noexcept {
