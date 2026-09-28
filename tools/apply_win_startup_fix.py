@@ -627,7 +627,9 @@ old_headless_cvar = """REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
 new_headless_cvar = """REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
                     "Don't display any UI, using defaults for prompts as needed");
 REXCVAR_DEFINE_BOOL(asura_auto_first_save_prompt, true, "Theseus",
-                    "Automatically confirm Asura's first-run save creation prompt");"""
+                    "Automatically confirm Asura's first-run save creation prompt");
+REXCVAR_DEFINE_BOOL(asura_first_run, false, "Theseus",
+                    "Theseus detected no prior Asura save/profile/options data");"""
 
 patch_once(xam_ui, old_headless_cvar, new_headless_cvar,
            "T04 auto first-save prompt cvar")
@@ -635,7 +637,8 @@ patch_once(xam_ui, old_headless_cvar, new_headless_cvar,
 old_ui_dialog_extern = """extern std::atomic<int> xam_dialogs_shown_;"""
 
 new_ui_dialog_extern = """extern std::atomic<int> xam_dialogs_shown_;
-extern std::atomic_bool g_asura_missing_saved_game;"""
+extern std::atomic_bool g_asura_missing_saved_game;
+static std::atomic_bool g_asura_first_run_prompt_consumed{false};"""
 
 patch_once(xam_ui, old_ui_dialog_extern, new_ui_dialog_extern,
            "T04 first-run save extern")
@@ -643,14 +646,24 @@ patch_once(xam_ui, old_ui_dialog_extern, new_ui_dialog_extern,
 old_message_result = """  X_RESULT result;
   if (REXCVAR_GET(headless)) {"""
 
-new_message_result = """  // Project-specific PC polish: only auto-confirm when SavedGame enumeration
-  // has just proven there is no save and the immediately following prompt has
-  // two buttons. Consume the one-shot state on the next message regardless so
-  // it can never leak into an unrelated later dialog.
+new_message_result = """  // Project-specific PC polish. T04.1 receives an explicit first-run decision
+  // from Theseus before XAM starts, so this no longer depends on SavedGame
+  // enumeration ordering. Only a two-button prompt with the first button
+  // focused is eligible, and the explicit first-run path is strictly one-shot.
+  const bool explicit_first_run_candidate =
+      REXCVAR_GET(asura_first_run) && button_count == 2 && active_button == 0;
+  const bool explicit_first_run =
+      explicit_first_run_candidate &&
+      !g_asura_first_run_prompt_consumed.exchange(true, std::memory_order_acq_rel);
+
+  // Keep the T04 enumeration signal as a compatibility fallback, but consume it
+  // immediately so it cannot leak into an unrelated later dialog.
   const bool missing_saved_game =
       g_asura_missing_saved_game.exchange(false, std::memory_order_acq_rel);
-  if (REXCVAR_GET(asura_auto_first_save_prompt) && missing_saved_game &&
-      button_count == 2) {
+
+  if (REXCVAR_GET(asura_auto_first_save_prompt) &&
+      (explicit_first_run ||
+       (missing_saved_game && button_count == 2 && active_button == 0))) {
     auto run = [result_ptr]() -> X_RESULT {
       *result_ptr = 0;  // first button: affirmative in Asura's creation prompt
       return X_ERROR_SUCCESS;
