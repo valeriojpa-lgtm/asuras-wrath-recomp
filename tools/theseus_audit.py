@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T01 Theseus dependency audit.
+"""T02 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -52,7 +52,7 @@ def main() -> int:
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T01-platform-bootstrap",
+        "Milestone: T02-native-paths-config",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -64,7 +64,11 @@ def main() -> int:
         f"Direct ReXGlue refs inside src/platform: {platform_refs}",
         f"Direct ReXGlue refs in host-side src: {total_refs}",
         "",
-        "Service backends (T01):",
+        "Native host facilities (T02):",
+        "  portable paths : native",
+        "  config         : native",
+        "",
+        "Runtime service backends:",
         "  filesystem : rexglue",
         "  input      : rexglue",
         "  saves      : rexglue",
@@ -85,8 +89,9 @@ def main() -> int:
 
     lines += [
         "",
-        "T01 invariant:",
-        "  Platform boundary exists; runtime behavior remains RUN04-compatible.",
+        "T02 invariant:",
+        "  Portable path discovery and launcher config are Theseus-owned.",
+        "  Runtime filesystem remains ReXGlue-backed until T03.",
         "  Later milestones replace one backend at a time and keep A/B fallback.",
         "",
     ]
