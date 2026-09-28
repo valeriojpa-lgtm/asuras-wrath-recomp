@@ -349,3 +349,32 @@ new_xgetlanguage = """u32 XGetLanguage_entry() {
 
 patch_once(xam_info, old_xgetlanguage, new_xgetlanguage,
            "XGetLanguage user language support")
+
+
+# 7) TU01 runtime patch: ReXGlue normally looks only for a sibling
+# "default.xexp" next to default.xex. Asura's portable preservation layout keeps
+# the preserved retail XEX untouched and stores the verified derived XEXP under
+# Data/Update/default.xexp. Fall back to update: when no sibling patch exists.
+user_module = Path("tools/rexglue/src/system/user_module.cpp")
+
+old_patch_lookup = """  // Search for sibling XEX patch file
+  auto patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
+  if (patch_entry) {
+    auto patch_path = patch_entry->absolute_path();
+
+    REXSYS_DEBUG("Loading XEX patch from {}", patch_path);"""
+
+new_patch_lookup = """  // Search for sibling XEX patch file first. Recompiled preservation
+  // projects may keep the retail XEX immutable and place an update-derived
+  // XEXP under the separately-mounted update: device instead.
+  auto patch_entry = kernel_state_->file_system()->ResolvePath(path_ + "p");
+  if (!patch_entry) {
+    patch_entry = kernel_state_->file_system()->ResolvePath("update:\\\\default.xexp");
+  }
+  if (patch_entry) {
+    auto patch_path = patch_entry->absolute_path();
+
+    REXSYS_INFO("Loading XEX patch from {}", patch_path);"""
+
+patch_once(user_module, old_patch_lookup, new_patch_lookup,
+           "TU01 update-device XEXP fallback")
