@@ -1042,3 +1042,453 @@ uint64_t Clock::QueryHostUptimeMillis() {
 
 patch_once(clock_win_cpp, old_t07_clock_win_impl, new_t07_clock_win_impl,
            "T07 delegate Windows host clock to Theseus")
+
+
+# 11) Theseus T08 host synchronization foundation. ReXGlue keeps the public
+# rex::thread object interfaces and Xbox kernel ABI, but Win32 synchronization
+# operations delegate to the project-owned Theseus bridge.
+threading_win_cpp = Path("tools/rexglue/src/core/threading_win.cpp")
+
+old_t08_sync_include = """#include <rex/assert.h>
+#include <rex/chrono/chrono_steady_cast.h>"""
+
+new_t08_sync_include = """#include <rex/assert.h>
+#include <rex/chrono/chrono_steady_cast.h>
+
+#include "compat/theseus_sync_bridge.h"
+"""
+
+patch_once(threading_win_cpp, old_t08_sync_include, new_t08_sync_include,
+           "T08 synchronization bridge include")
+
+old_t08_basic_ops = """void MaybeYield() {
+  SwitchToThread();
+  MemoryBarrier();
+}
+
+void SyncMemory() {
+  MemoryBarrier();
+}
+
+void Sleep(std::chrono::microseconds duration) {
+  if (duration.count() < 100) {
+    MaybeYield();
+  } else {
+    ::Sleep(static_cast<DWORD>(duration.count() / 1000));
+  }
+}
+
+SleepResult AlertableSleep(std::chrono::microseconds duration) {
+  if (SleepEx(static_cast<DWORD>(duration.count() / 1000), TRUE) == WAIT_IO_COMPLETION) {
+    return SleepResult::kAlerted;
+  }
+  return SleepResult::kSuccess;
+}
+
+TlsHandle AllocateTlsHandle() {
+  return TlsAlloc();
+}
+
+bool FreeTlsHandle(TlsHandle handle) {
+  return TlsFree(handle) ? true : false;
+}
+
+uintptr_t GetTlsValue(TlsHandle handle) {
+  return reinterpret_cast<uintptr_t>(TlsGetValue(handle));
+}
+
+bool SetTlsValue(TlsHandle handle, uintptr_t value) {
+  return TlsSetValue(handle, reinterpret_cast<void*>(value)) ? true : false;
+}"""
+
+new_t08_basic_ops = """void MaybeYield() {
+  theseus::sync::Yield();
+}
+
+void SyncMemory() {
+  theseus::sync::MemoryBarrier();
+}
+
+void Sleep(std::chrono::microseconds duration) {
+  theseus::sync::SleepMicros(
+      static_cast<uint64_t>(std::max<int64_t>(0, duration.count())));
+}
+
+SleepResult AlertableSleep(std::chrono::microseconds duration) {
+  return theseus::sync::AlertableSleepMicros(
+             static_cast<uint64_t>(std::max<int64_t>(0, duration.count()))) ==
+                 theseus::sync::AlertableSleepOutcome::kAlerted
+             ? SleepResult::kAlerted
+             : SleepResult::kSuccess;
+}
+
+TlsHandle AllocateTlsHandle() {
+  return static_cast<TlsHandle>(theseus::sync::AllocateTls());
+}
+
+bool FreeTlsHandle(TlsHandle handle) {
+  return theseus::sync::FreeTls(static_cast<uint32_t>(handle));
+}
+
+uintptr_t GetTlsValue(TlsHandle handle) {
+  return theseus::sync::GetTls(static_cast<uint32_t>(handle));
+}
+
+bool SetTlsValue(TlsHandle handle, uintptr_t value) {
+  return theseus::sync::SetTls(static_cast<uint32_t>(handle), value);
+}"""
+
+patch_once(threading_win_cpp, old_t08_basic_ops, new_t08_basic_ops,
+           "T08 delegate yield sleep and TLS to Theseus")
+
+old_t08_handle_dtor = """  ~Win32Handle() override {
+    CloseHandle(handle_);
+    handle_ = nullptr;
+  }"""
+
+new_t08_handle_dtor = """  ~Win32Handle() override {
+    theseus::sync::CloseNativeHandle(handle_);
+    handle_ = nullptr;
+  }"""
+
+patch_once(threading_win_cpp, old_t08_handle_dtor, new_t08_handle_dtor,
+           "T08 delegate native handle lifetime to Theseus")
+
+old_t08_waits = """WaitResult Wait(WaitHandle* wait_handle, bool is_alertable, std::chrono::milliseconds timeout) {
+  HANDLE handle = wait_handle->native_handle();
+  DWORD result = WaitForSingleObjectEx(handle, DWORD(timeout.count()), is_alertable ? TRUE : FALSE);
+  switch (result) {
+    case WAIT_OBJECT_0:
+      return WaitResult::kSuccess;
+    case WAIT_ABANDONED:
+      return WaitResult::kAbandoned;
+    case WAIT_IO_COMPLETION:
+      return WaitResult::kUserCallback;
+    case WAIT_TIMEOUT:
+      return WaitResult::kTimeout;
+    default:
+    case WAIT_FAILED:
+      return WaitResult::kFailed;
+  }
+}
+
+WaitResult SignalAndWait(WaitHandle* wait_handle_to_signal, WaitHandle* wait_handle_to_wait_on,
+                         bool is_alertable, std::chrono::milliseconds timeout) {
+  HANDLE handle_to_signal = wait_handle_to_signal->native_handle();
+  HANDLE handle_to_wait_on = wait_handle_to_wait_on->native_handle();
+  DWORD result = SignalObjectAndWait(handle_to_signal, handle_to_wait_on, DWORD(timeout.count()),
+                                     is_alertable ? TRUE : FALSE);
+  switch (result) {
+    case WAIT_OBJECT_0:
+      return WaitResult::kSuccess;
+    case WAIT_ABANDONED:
+      return WaitResult::kAbandoned;
+    case WAIT_IO_COMPLETION:
+      return WaitResult::kUserCallback;
+    case WAIT_TIMEOUT:
+      return WaitResult::kTimeout;
+    default:
+    case WAIT_FAILED:
+      return WaitResult::kFailed;
+  }
+}
+
+std::pair<WaitResult, size_t> WaitMultiple(WaitHandle* wait_handles[], size_t wait_handle_count,
+                                           bool wait_all, bool is_alertable,
+                                           std::chrono::milliseconds timeout) {
+  std::vector<HANDLE> handles(wait_handle_count);
+  for (size_t i = 0; i < wait_handle_count; ++i) {
+    handles[i] = wait_handles[i]->native_handle();
+  }
+  DWORD result =
+      WaitForMultipleObjectsEx(DWORD(handles.size()), handles.data(), wait_all ? TRUE : FALSE,
+                               DWORD(timeout.count()), is_alertable ? TRUE : FALSE);
+  if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + handles.size()) {
+    return std::pair<WaitResult, size_t>(WaitResult::kSuccess, result - WAIT_OBJECT_0);
+  } else if (result >= WAIT_ABANDONED_0 && result < WAIT_ABANDONED_0 + handles.size()) {
+    return std::pair<WaitResult, size_t>(WaitResult::kAbandoned, result - WAIT_ABANDONED_0);
+  }
+  switch (result) {
+    case WAIT_IO_COMPLETION:
+      return std::pair<WaitResult, size_t>(WaitResult::kUserCallback, 0);
+    case WAIT_TIMEOUT:
+      return std::pair<WaitResult, size_t>(WaitResult::kTimeout, 0);
+    default:
+    case WAIT_FAILED:
+      return std::pair<WaitResult, size_t>(WaitResult::kFailed, 0);
+  }
+}"""
+
+new_t08_waits = """static WaitResult FromTheseusWait(theseus::sync::WaitOutcome result) {
+  switch (result) {
+    case theseus::sync::WaitOutcome::kSuccess:
+      return WaitResult::kSuccess;
+    case theseus::sync::WaitOutcome::kUserCallback:
+      return WaitResult::kUserCallback;
+    case theseus::sync::WaitOutcome::kTimeout:
+      return WaitResult::kTimeout;
+    case theseus::sync::WaitOutcome::kAbandoned:
+      return WaitResult::kAbandoned;
+    default:
+      return WaitResult::kFailed;
+  }
+}
+
+static uint64_t ToTheseusTimeout(std::chrono::milliseconds timeout) {
+  return timeout == std::chrono::milliseconds::max()
+             ? std::numeric_limits<uint64_t>::max()
+             : static_cast<uint64_t>(std::max<int64_t>(0, timeout.count()));
+}
+
+WaitResult Wait(WaitHandle* wait_handle, bool is_alertable, std::chrono::milliseconds timeout) {
+  return FromTheseusWait(theseus::sync::WaitOne(
+      wait_handle->native_handle(), is_alertable, ToTheseusTimeout(timeout)));
+}
+
+WaitResult SignalAndWait(WaitHandle* wait_handle_to_signal, WaitHandle* wait_handle_to_wait_on,
+                         bool is_alertable, std::chrono::milliseconds timeout) {
+  return FromTheseusWait(theseus::sync::SignalAndWait(
+      wait_handle_to_signal->native_handle(), wait_handle_to_wait_on->native_handle(),
+      is_alertable, ToTheseusTimeout(timeout)));
+}
+
+std::pair<WaitResult, size_t> WaitMultiple(WaitHandle* wait_handles[], size_t wait_handle_count,
+                                           bool wait_all, bool is_alertable,
+                                           std::chrono::milliseconds timeout) {
+  std::vector<void*> handles(wait_handle_count);
+  for (size_t i = 0; i < wait_handle_count; ++i) {
+    handles[i] = wait_handles[i]->native_handle();
+  }
+  const auto result = theseus::sync::WaitMany(
+      handles.data(), handles.size(), wait_all, is_alertable,
+      ToTheseusTimeout(timeout));
+  return {FromTheseusWait(result.outcome), result.index};
+}"""
+
+patch_once(threading_win_cpp, old_t08_waits, new_t08_waits,
+           "T08 delegate waits to Theseus")
+
+old_t08_events = """class Win32Event : public Win32Handle<Event> {
+ public:
+  explicit Win32Event(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Event() override = default;
+  void Set() override { SetEvent(handle_); }
+  void Reset() override { ResetEvent(handle_); }
+  void Pulse() override { PulseEvent(handle_); }
+};
+
+std::unique_ptr<Event> Event::CreateManualResetEvent(bool initial_state) {
+  HANDLE handle = CreateEvent(nullptr, TRUE, initial_state ? TRUE : FALSE, nullptr);
+  if (handle) {
+    return std::make_unique<Win32Event>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}
+
+std::unique_ptr<Event> Event::CreateAutoResetEvent(bool initial_state) {
+  HANDLE handle = CreateEvent(nullptr, FALSE, initial_state ? TRUE : FALSE, nullptr);
+  if (handle) {
+    return std::make_unique<Win32Event>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}"""
+
+new_t08_events = """class Win32Event : public Win32Handle<Event> {
+ public:
+  explicit Win32Event(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Event() override = default;
+  void Set() override { theseus::sync::SetEventSignaled(handle_); }
+  void Reset() override { theseus::sync::ResetEventSignaled(handle_); }
+  void Pulse() override { theseus::sync::PulseEventSignaled(handle_); }
+};
+
+std::unique_ptr<Event> Event::CreateManualResetEvent(bool initial_state) {
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateEvent(true, initial_state));
+  if (handle) {
+    return std::make_unique<Win32Event>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}
+
+std::unique_ptr<Event> Event::CreateAutoResetEvent(bool initial_state) {
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateEvent(false, initial_state));
+  if (handle) {
+    return std::make_unique<Win32Event>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}"""
+
+patch_once(threading_win_cpp, old_t08_events, new_t08_events,
+           "T08 delegate events to Theseus")
+
+old_t08_semaphore = """class Win32Semaphore : public Win32Handle<Semaphore> {
+ public:
+  explicit Win32Semaphore(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Semaphore() override = default;
+  bool Release(int release_count, int* out_previous_count) override {
+    return ReleaseSemaphore(handle_, release_count, reinterpret_cast<LPLONG>(out_previous_count))
+               ? true
+               : false;
+  }
+};
+
+std::unique_ptr<Semaphore> Semaphore::Create(int initial_count, int maximum_count) {
+  HANDLE handle = CreateSemaphore(nullptr, initial_count, maximum_count, nullptr);
+  if (handle) {
+    return std::make_unique<Win32Semaphore>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}"""
+
+new_t08_semaphore = """class Win32Semaphore : public Win32Handle<Semaphore> {
+ public:
+  explicit Win32Semaphore(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Semaphore() override = default;
+  bool Release(int release_count, int* out_previous_count) override {
+    return theseus::sync::ReleaseSemaphore(
+        handle_, release_count,
+        reinterpret_cast<int32_t*>(out_previous_count));
+  }
+};
+
+std::unique_ptr<Semaphore> Semaphore::Create(int initial_count, int maximum_count) {
+  auto handle = static_cast<HANDLE>(
+      theseus::sync::CreateSemaphore(initial_count, maximum_count));
+  if (handle) {
+    return std::make_unique<Win32Semaphore>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}"""
+
+patch_once(threading_win_cpp, old_t08_semaphore, new_t08_semaphore,
+           "T08 delegate semaphores to Theseus")
+
+old_t08_mutant = """class Win32Mutant : public Win32Handle<Mutant> {
+ public:
+  explicit Win32Mutant(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Mutant() = default;
+  bool Release() override { return ReleaseMutex(handle_) ? true : false; }
+};
+
+std::unique_ptr<Mutant> Mutant::Create(bool initial_owner) {
+  HANDLE handle = CreateMutex(nullptr, initial_owner ? TRUE : FALSE, nullptr);
+  if (handle) {
+    return std::make_unique<Win32Mutant>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}"""
+
+new_t08_mutant = """class Win32Mutant : public Win32Handle<Mutant> {
+ public:
+  explicit Win32Mutant(HANDLE handle) : Win32Handle(handle) {}
+  ~Win32Mutant() = default;
+  bool Release() override { return theseus::sync::ReleaseMutex(handle_); }
+};
+
+std::unique_ptr<Mutant> Mutant::Create(bool initial_owner) {
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateMutex(initial_owner));
+  if (handle) {
+    return std::make_unique<Win32Mutant>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}"""
+
+patch_once(threading_win_cpp, old_t08_mutant, new_t08_mutant,
+           "T08 delegate mutexes to Theseus")
+
+old_t08_timer_set_once = """    LARGE_INTEGER due_time_li;
+    due_time_li.QuadPart = WClock_::to_file_time(due_time);
+    auto completion_routine =
+        callback_ ? reinterpret_cast<PTIMERAPCROUTINE>(CompletionRoutine) : NULL;
+    return SetWaitableTimer(handle_, &due_time_li, 0, completion_routine, this, FALSE) ? true
+                                                                                       : false;"""
+
+new_t08_timer_set_once = """    const auto due_time_filetime = WClock_::to_file_time(due_time);
+    const auto completion_routine =
+        callback_ ? reinterpret_cast<uintptr_t>(CompletionRoutine) : uintptr_t{0};
+    return theseus::sync::SetWaitableTimer(
+        handle_, due_time_filetime, 0, completion_routine, this);"""
+
+patch_once(threading_win_cpp, old_t08_timer_set_once, new_t08_timer_set_once,
+           "T08 delegate one-shot timers to Theseus")
+
+old_t08_timer_repeating = """    LARGE_INTEGER due_time_li;
+    due_time_li.QuadPart = WClock_::to_file_time(due_time);
+    auto completion_routine =
+        callback_ ? reinterpret_cast<PTIMERAPCROUTINE>(CompletionRoutine) : NULL;
+    return SetWaitableTimer(handle_, &due_time_li, int32_t(period.count()), completion_routine,
+                            this, FALSE)
+               ? true
+               : false;"""
+
+new_t08_timer_repeating = """    const auto due_time_filetime = WClock_::to_file_time(due_time);
+    const auto completion_routine =
+        callback_ ? reinterpret_cast<uintptr_t>(CompletionRoutine) : uintptr_t{0};
+    return theseus::sync::SetWaitableTimer(
+        handle_, due_time_filetime, int32_t(period.count()),
+        completion_routine, this);"""
+
+patch_once(threading_win_cpp, old_t08_timer_repeating, new_t08_timer_repeating,
+           "T08 delegate repeating timers to Theseus")
+
+old_t08_timer_cancel = """    return CancelWaitableTimer(handle_) ? true : false;"""
+new_t08_timer_cancel = """    return theseus::sync::CancelWaitableTimer(handle_);"""
+
+patch_once(threading_win_cpp, old_t08_timer_cancel, new_t08_timer_cancel,
+           "T08 delegate timer cancellation to Theseus")
+
+old_t08_timer_create_manual = """std::unique_ptr<Timer> Timer::CreateManualResetTimer() {
+  HANDLE handle = CreateWaitableTimer(NULL, TRUE, NULL);
+  if (handle) {
+    return std::make_unique<Win32Timer>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}"""
+
+new_t08_timer_create_manual = """std::unique_ptr<Timer> Timer::CreateManualResetTimer() {
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimer(true));
+  if (handle) {
+    return std::make_unique<Win32Timer>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}"""
+
+patch_once(threading_win_cpp, old_t08_timer_create_manual, new_t08_timer_create_manual,
+           "T08 delegate manual timers to Theseus")
+
+old_t08_timer_create_sync = """std::unique_ptr<Timer> Timer::CreateSynchronizationTimer() {
+  HANDLE handle = CreateWaitableTimer(NULL, FALSE, NULL);
+  if (handle) {
+    return std::make_unique<Win32Timer>(handle);
+  } else {
+    LOG_LASTERROR();
+    return nullptr;
+  }
+}"""
+
+new_t08_timer_create_sync = """std::unique_ptr<Timer> Timer::CreateSynchronizationTimer() {
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimer(false));
+  if (handle) {
+    return std::make_unique<Win32Timer>(handle);
+  }
+  LOG_LASTERROR();
+  return nullptr;
+}"""
+
+patch_once(threading_win_cpp, old_t08_timer_create_sync, new_t08_timer_create_sync,
+           "T08 delegate synchronization timers to Theseus")
