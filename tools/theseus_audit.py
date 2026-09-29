@@ -281,10 +281,47 @@ def main() -> int:
         else "FAIL"
     )
 
+    presentation_policy_header = read_text(
+        repo / "src" / "platform" / "theseus_presentation.h"
+    )
+    presentation_bridge_header = read_text(
+        repo / "src" / "compat" / "rexglue_presentation_bridge.h"
+    )
+    presentation_bridge_source = read_text(
+        repo / "src" / "compat" / "rexglue_presentation_bridge.cpp"
+    )
+    presentation_patch_markers = (
+        "T10.3 presentation hooks",
+        "T10.3 delegate host window creation",
+        "T10.3 delegate presenter attachment",
+    )
+    missing_presentation_patch_markers = [
+        marker for marker in presentation_patch_markers if marker not in patch_script
+    ]
+    presentation_boundary = (
+        "PASS"
+        if "class NativePresentationPolicy" in presentation_policy_header
+        and "struct PresentationPolicyState" in presentation_policy_header
+        and "MakePresentationPolicy" in config_header
+        and "platform.presentation().Configure" in launcher_source
+        and "Service::kPresentation" in platform_source
+        and "CreatePresentationWindow" in presentation_bridge_header
+        and "AttachPresentationPresenter" in presentation_bridge_header
+        and "rex::ui::Window::Create" in presentation_bridge_source
+        and "window.SetPresenter(presenter)" in presentation_bridge_source
+        and "host.presentation().Configure(native_config.MakePresentationPolicy())" in app_header
+        and "OnCreatePresentationWindow" in app_header
+        and "OnAttachPresentationPresenter" in app_header
+        and "src/platform/theseus_presentation.cpp" in cmake_source
+        and "src/compat/rexglue_presentation_bridge.cpp" in cmake_source
+        and not missing_presentation_patch_markers
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T10.2-graphics-backend-bridge",
+        "Milestone: T10.3-native-presentation-boundary",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -304,8 +341,9 @@ def main() -> int:
         f"Native audio policy boundary: {audio_policy_boundary}",
         f"Audio compatibility bridge: {audio_bridge_boundary}",
         f"Graphics backend compatibility bridge: {graphics_backend_bridge}",
+        f"Native presentation boundary: {presentation_boundary}",
         "",
-        "Native host facilities (T10.2):",
+        "Native host facilities (T10.3):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -313,6 +351,7 @@ def main() -> int:
         "  input policy   : native",
         "  audio policy   : native",
         "  graphics policy : native",
+        "  presentation boundary : native",
         "  timing         : native",
         "  threading sync : native",
         "  crash telemetry : native",
@@ -327,7 +366,8 @@ def main() -> int:
         "  audio      : native policy / rexglue XMA + SDL bridge",
         "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
         "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
-        "  graphics   : native policy + explicit backend injection / rexgpu-xenos compatibility renderer",
+        "  graphics   : native policy + backend injection / rexgpu-xenos compatibility renderer",
+        "  presentation : Theseus create+attach boundary / rexglue SDL Window + backend Presenter",
         "",
         "Host files with direct ReXGlue references:",
     ]
@@ -340,12 +380,13 @@ def main() -> int:
 
     lines += [
         "",
-        "T10.2 invariant:",
-        "  T10 RUN 01 remains the validated graphics-policy baseline.",
-        "  The runtime child reconstructs graphics policy from Theseus-owned Asura.ini.",
-        "  Theseus explicitly injects the selected rexgpu-xenos backend into RuntimeConfig.",
-        "  ReXApp legacy plugin loading remains only as a safety fallback.",
-        "  No Xenos translation, command processor, shader or presentation behavior is replaced yet.",
+        "T10.3 invariant:",
+        "  T10.2 remains the validated graphics-backend baseline.",
+        "  Theseus owns stable host presentation policy from Asura.ini.",
+        "  Asura overrides ReXApp host-window creation through the explicit presentation bridge.",
+        "  Asura overrides presenter attachment through the same explicit boundary.",
+        "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
+        "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
         "  In-process unhandled failures still produce text reports plus minidumps.",
         "  The launcher survives as an external guard while the game runs in a normal child process.",
@@ -437,6 +478,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 13
+    if presentation_boundary != "PASS":
+        print(
+            "ERROR: T10.3 native presentation boundary is incomplete.",
+            file=sys.stderr,
+        )
+        return 14
     return 0
 
 
