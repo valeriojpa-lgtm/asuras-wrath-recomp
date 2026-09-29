@@ -22,6 +22,26 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   add_compile_options(-mssse3 -mavx2 -mfma)
 endif()
 
+option(ASURA_ENABLE_ASAN "Instrument host/ReXGlue code with AddressSanitizer" OFF)
+
+if(ASURA_ENABLE_ASAN)
+  if(NOT WIN32)
+    message(FATAL_ERROR "T09.2 AddressSanitizer probe is currently validated only on Windows")
+  endif()
+
+  # Keep this close enough to the Release build to reproduce lifetime bugs,
+  # while retaining useful stacks for allocator diagnostics.
+  add_compile_options(
+    -fsanitize=address
+    -fno-omit-frame-pointer
+    -fno-optimize-sibling-calls
+    -O2
+    -g
+  )
+  add_link_options(-fsanitize=address)
+  add_compile_definitions(ASURA_HEAP_PROBE=1)
+endif()
+
 if(NOT REXSDK_DIR)
   set(REXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/rexglue" CACHE PATH "Path to rexglue-sdk source tree")
 endif()
@@ -93,6 +113,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_threading.cpp
   src/platform/theseus_crash.cpp
   src/platform/theseus_stability_guard.cpp
+  src/platform/theseus_heap_probe.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
