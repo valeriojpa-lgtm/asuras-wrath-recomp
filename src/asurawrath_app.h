@@ -8,6 +8,7 @@
 #include <rex/rex_app.h>
 
 #include "compat/rexglue_filesystem_bridge.h"
+#include "platform/theseus_crash.h"
 #include "platform/theseus_platform.h"
 
 #if defined(__ANDROID__)
@@ -80,6 +81,8 @@ public:
 #endif
 
   void OnPreSetup(rex::RuntimeConfig &config) override {
+    theseus::crash::Install();
+    theseus::crash::Breadcrumb("runtime: OnPreSetup");
     // T03: Theseus discovers the process location itself. Host filesystem
     // bootstrap no longer depends on ReXGlue.
     theseus::Platform::Instance().BootstrapFromProcess();
@@ -106,9 +109,41 @@ public:
 
   void OnPostSetup() override {
     SetupPcDataLayoutAliases();
+    theseus::crash::Breadcrumb("runtime: OnPostSetup");
 #if defined(__ANDROID__)
     SetupVirtualGamepad();
 #endif
+  }
+
+  void OnPreLaunchModule() override {
+    theseus::crash::Breadcrumb("guest: pre-launch");
+  }
+
+  void OnPostLaunchModule(rex::system::XThread* thread) override {
+    (void)thread;
+    theseus::crash::Breadcrumb("guest: main thread created");
+  }
+
+  void OnGuestThreadExit(rex::system::XThread* thread) override {
+    (void)thread;
+    theseus::crash::Breadcrumb("guest: main thread exited");
+  }
+
+  void OnWindowFocusChanged(bool focused) override {
+    theseus::crash::Breadcrumb(
+        focused ? "window: focus gained" : "window: focus lost");
+  }
+
+  void OnWindowMinimized() override {
+    theseus::crash::Breadcrumb("window: minimized");
+  }
+
+  void OnWindowRestored() override {
+    theseus::crash::Breadcrumb("window: restored");
+  }
+
+  void OnShutdown() override {
+    theseus::crash::Breadcrumb("runtime: shutdown");
   }
 
   void OnConfigurePaths(rex::PathConfig &paths) override {
