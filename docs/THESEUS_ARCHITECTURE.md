@@ -537,3 +537,56 @@ semantics remain unchanged in T10.2.
 
 This is deliberately reversible: T10 RUN 01 remains the known-good baseline,
 and the bridge can be bypassed without touching the guest code.
+
+
+## T10.3: Native Presentation Boundary
+
+T10.3 moves the next host-facing graphics responsibility behind Theseus:
+**host-window creation and presenter attachment**.
+
+ReXGlue previously owned both operations directly inside `ReXApp::SetupPresentation`.
+The preserved SDK path now exposes two narrow virtual hooks with identical
+default behavior:
+
+- `OnCreatePresentationWindow(...)`
+- `OnAttachPresentationPresenter(...)`
+
+Asura overrides those hooks and routes them through the explicit
+`rexglue_presentation_bridge`.
+
+```
+Asura.ini
+   |
+Theseus NativePresentationPolicy
+   |
+AsurawrathApp presentation hooks
+   |
+rexglue_presentation_bridge       [temporary adapter]
+   |                    |
+SDL Window              backend Presenter
+   \____________________/
+             |
+          host surface
+```
+
+Theseus owns in T10.3:
+- stable startup width/height policy;
+- fullscreen startup policy;
+- the decision point that creates the host window;
+- the decision point that attaches the renderer presenter to that window.
+
+Still compatibility-backed:
+- the concrete `rex::ui::Window` implementation (SDL);
+- the concrete D3D12/Vulkan `Presenter`;
+- swapchain/surface implementation details;
+- Xenos command processing and shader translation.
+
+The T10.2 path remains frozen and is the immediate rollback baseline. The
+ReXApp default hook implementations preserve upstream-compatible behavior for
+non-Asura projects and for platforms where Theseus does not override the host
+presentation path.
+
+This boundary prepares T11 to replace fixed/preset display behavior with
+project-owned display enumeration and resolution handling. The strong T11
+validation resolutions are 1920x1200, 2560x1600 and 3440x1440, alongside
+standard 16:9 modes.
