@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T05 Theseus dependency audit.
+"""T06 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -111,10 +111,25 @@ def main() -> int:
         else "FAIL"
     )
 
+    audio_policy_header = read_text(repo / "src" / "platform" / "theseus_audio.h")
+    audio_policy_boundary = (
+        "PASS"
+        if "class NativeAudioPolicy" in audio_policy_header
+        and "struct AudioPolicyState" in audio_policy_header
+        else "FAIL"
+    )
+    audio_bridge_markers = (
+        "T06 host audio app identity",
+    )
+    missing_audio_markers = [
+        marker for marker in audio_bridge_markers if marker not in patch_script
+    ]
+    audio_bridge_boundary = "PASS" if not missing_audio_markers else "FAIL"
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T05-native-input",
+        "Milestone: T06-native-audio-policy",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -131,20 +146,23 @@ def main() -> int:
         f"Save/profile compatibility bridge: {save_bridge_boundary}",
         f"Native input policy boundary: {input_policy_boundary}",
         f"Input compatibility bridge: {input_bridge_boundary}",
+        f"Native audio policy boundary: {audio_policy_boundary}",
+        f"Audio compatibility bridge: {audio_bridge_boundary}",
         "",
-        "Native host facilities (T05):",
+        "Native host facilities (T06):"
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
         "  saves/profile  : native",
         "  input policy   : native",
+        "  audio policy   : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
         "  input      : native policy / rexglue physical-driver + XAM bridge",
         "  saves      : native host / rexglue XAM bridge",
-        "  video      : rexglue",
-        "  audio      : rexglue",
+        "  video      : guest Bink code / graphics path (not a standalone ReXGlue decoder)",
+        "  audio      : native policy / rexglue XMA + SDL bridge",
         "  timing     : rexglue",
         "  threading  : rexglue",
         "  graphics   : rexglue",
@@ -160,12 +178,12 @@ def main() -> int:
 
     lines += [
         "",
-        "T05 invariant:",
-        "  Input policy, bindings and mouse behavior are Theseus-owned.",
-        "  SDL/XInput physical drivers remain a temporary compatibility bridge.",
-        "  Guest XamInput* calls remain the temporary Xbox input ABI.",
-        "  Cursor hides only while the game window has focus and restores on focus loss.",
-        "  Mouse-look remains opt-in and independent from cursor visibility.",
+        "T06 invariant:",
+        "  Audio policy/configuration is Theseus-owned.",
+        "  XMA decoding remains a temporary ReXGlue/FFmpeg bridge.",
+        "  SDL sample submission remains a temporary ReXGlue bridge.",
+        "  The host audio identity is Asura's Wrath, not rexglue.",
+        "  Bink cinematics were audited separately: ReXGlue has no standalone Bink decoder.",
         "",
     ]
 
@@ -196,6 +214,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 5
+    if missing_audio_markers or audio_policy_boundary != "PASS":
+        print(
+            "ERROR: T06 native audio policy/bridge is incomplete.",
+            file=sys.stderr,
+        )
+        return 6
     return 0
 
 
