@@ -12,12 +12,14 @@ namespace theseus {
 struct Config {
   int width = 1280;
   int height = 720;
+  int monitor = 0;  // 0 = system/default, 1..N = enumerated display.
   bool fullscreen = true;
 
   [[nodiscard]] PresentationPolicyState MakePresentationPolicy() const {
     PresentationPolicyState policy;
     policy.width = width;
     policy.height = height;
+    policy.monitor = monitor;
     policy.fullscreen = fullscreen;
     return policy;
   }
