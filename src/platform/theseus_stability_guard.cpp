@@ -25,6 +25,8 @@ namespace {
 
 #if defined(_WIN32)
 
+constexpr DWORD kTheseusHardExitSelfTest = 0xE0425498u;
+
 std::filesystem::path ExecutablePath() {
   std::wstring buffer(32768, L'\0');
   const DWORD length = GetModuleFileNameW(
@@ -142,6 +144,8 @@ const char* ExitCodeName(DWORD code) {
       return "STATUS_FAIL_FAST_EXCEPTION";
     case 0xE06D7363u:
       return "UNHANDLED_CPP_EXCEPTION";
+    case kTheseusHardExitSelfTest:
+      return "THESEUS_HARD_EXIT_SELF_TEST";
     default:
       return "UNKNOWN_OR_APPLICATION_DEFINED";
   }
@@ -218,6 +222,13 @@ void WriteHardExitReport(
 #endif
 
 }  // namespace
+
+[[noreturn]] void TriggerHardExitSelfTest() {
+#if defined(_WIN32)
+  TerminateProcess(GetCurrentProcess(), kTheseusHardExitSelfTest);
+#endif
+  std::abort();
+}
 
 bool LaunchGuardedRuntime(const std::vector<std::string>& runtime_args) {
 #if defined(_WIN32)
