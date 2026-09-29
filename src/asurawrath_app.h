@@ -154,6 +154,17 @@ public:
 #endif
   }
 
+  void OnDetachPresentationPresenter(rex::ui::Window* window) override {
+#if defined(_WIN32) && !defined(__ANDROID__)
+    if (window) {
+      asura::compat::DetachPresentationPresenter(*window);
+      theseus::crash::Breadcrumb("presentation: Theseus presenter detached");
+    }
+#else
+    rex::ReXApp::OnDetachPresentationPresenter(window);
+#endif
+  }
+
   void SetupPcDataLayoutAliases() {
     auto& host = theseus::Platform::Instance();
     if (!host.initialized()) {
