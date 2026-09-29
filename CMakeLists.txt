@@ -95,6 +95,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_crash.cpp
   src/platform/theseus_stability_guard.cpp
   src/compat/rexglue_filesystem_bridge.cpp
+  src/compat/rexglue_graphics_bridge.cpp
 )
 
 if(WIN32 AND NOT ANDROID)
