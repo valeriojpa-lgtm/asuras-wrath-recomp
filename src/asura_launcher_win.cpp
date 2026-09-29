@@ -40,6 +40,8 @@ enum ControlId : int {
   kMnk,
   kInputBackend,
   kControls,
+  kAudioMute,
+  kAudioBuffer,
   kLanguage,
   kShowAtStartup,
   kDefaults,
@@ -76,6 +78,18 @@ constexpr LanguageOption kLanguages[] = {
     {L"Deutsch", 3, 24},
     {L"Italiano", 6, 50},
     {L"日本語", 2, 53},
+};
+
+struct AudioBufferOption {
+  int frames;
+  const wchar_t* label;
+};
+
+constexpr AudioBufferOption kAudioBuffers[] = {
+    {4, L"Low latency (4)"},
+    {8, L"Default (8)"},
+    {16, L"Safe (16)"},
+    {32, L"High stability (32)"},
 };
 
 struct AdapterOption {
@@ -225,6 +239,7 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
       "--keybind_back=", "--keybind_start=",
       "--save_data_root=", "--user_profile_name=", "--user_profile_xuid=",
       "--asura_auto_first_save_prompt=", "--asura_first_run=",
+      "--audio_mute=", "--audio_maxqframes=",
   };
   std::erase_if(args, [](const std::string& arg) {
     for (const auto prefix : prefixes) {
@@ -307,6 +322,13 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_string("keybind_dpad_right", binds.dpad_right);
   add_string("keybind_back", binds.back);
   add_string("keybind_start", binds.start);
+
+  // T06 native audio policy. XMA decode and SDL sample submission remain
+  // temporary ReXGlue bridges, but the stable PC-facing policy is Theseus-owned.
+  platform.audio().Configure(s.MakeAudioPolicy());
+  const auto& audio = platform.audio().state();
+  add_bool("audio_mute", audio.mute);
+  add_int("audio_maxqframes", audio.queued_frames);
 
   add_int("user_language", s.language);
   add_int("user_country", s.country);
@@ -685,6 +707,8 @@ struct LauncherState {
   HWND async_shaders = nullptr;
   HWND mnk = nullptr;
   HWND input_backend = nullptr;
+  HWND audio_mute = nullptr;
+  HWND audio_buffer = nullptr;
   HWND language = nullptr;
   HWND show_at_startup = nullptr;
 
@@ -716,6 +740,15 @@ struct LauncherState {
       }
     }
     return 0;
+  }
+
+  int FindAudioBufferIndex(int frames) const {
+    for (size_t i = 0; i < std::size(kAudioBuffers); ++i) {
+      if (kAudioBuffers[i].frames == frames) {
+        return static_cast<int>(i);
+      }
+    }
+    return 1;  // Default (8)
   }
 
   void SetCheck(HWND control, bool checked) {
@@ -783,20 +816,29 @@ struct LauncherState {
                  reinterpret_cast<LPARAM>(L"XInput"));
     CreateButton(hwnd, font, kControls, L"Controls...", 42, 366, 120, 30);
 
-    CreateLabel(hwnd, font, L"LANGUAGE", 28, 414, 180, 22);
-    CreateLabel(hwnd, font, L"Game language", 42, 448, 145, 24);
-    language = CreateCombo(hwnd, font, kLanguage, 195, 444, 280, 220);
+    CreateLabel(hwnd, font, L"AUDIO", 28, 414, 180, 22);
+    audio_mute = CreateCheck(hwnd, font, kAudioMute, L"Mute", 42, 446, 120, 26);
+    CreateLabel(hwnd, font, L"Buffer / latency", 250, 448, 135, 24);
+    audio_buffer = CreateCombo(hwnd, font, kAudioBuffer, 390, 444, 220, 150);
+    for (const auto& option : kAudioBuffers) {
+      SendMessageW(audio_buffer, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(option.label));
+    }
+
+    CreateLabel(hwnd, font, L"LANGUAGE", 28, 494, 180, 22);
+    CreateLabel(hwnd, font, L"Game language", 42, 528, 145, 24);
+    language = CreateCombo(hwnd, font, kLanguage, 195, 524, 280, 220);
     for (const auto& option : kLanguages) {
       SendMessageW(language, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(option.label));
     }
     show_at_startup = CreateCheck(
         hwnd, font, kShowAtStartup, L"Show this launcher at startup",
-        500, 444, 220, 26);
+        500, 524, 220, 26);
 
-    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 512, 110, 34);
-    CreateButton(hwnd, font, kExit, L"Exit", 520, 512, 90, 34);
-    CreateButton(hwnd, font, kPlay, L"Play", 620, 512, 110, 34, true);
+    CreateButton(hwnd, font, kDefaults, L"Defaults", 28, 592, 110, 34);
+    CreateButton(hwnd, font, kExit, L"Exit", 520, 592, 90, 34);
+    CreateButton(hwnd, font, kPlay, L"Play", 620, 592, 110, 34, true);
 
     ApplySettingsToControls();
   }
@@ -844,6 +886,11 @@ struct LauncherState {
     settings.mnk = GetCheck(mnk);
     settings.input_backend =
         std::clamp(static_cast<int>(SendMessageW(input_backend, CB_GETCURSEL, 0, 0)), 0, 1);
+    settings.audio_mute = GetCheck(audio_mute);
+    int audio_buffer_index =
+        std::clamp(static_cast<int>(SendMessageW(audio_buffer, CB_GETCURSEL, 0, 0)),
+                   0, static_cast<int>(std::size(kAudioBuffers)) - 1);
+    settings.audio_queued_frames = kAudioBuffers[audio_buffer_index].frames;
 
     int language_index =
         std::clamp(static_cast<int>(SendMessageW(language, CB_GETCURSEL, 0, 0)),
@@ -948,7 +995,7 @@ bool ShowLauncher(LauncherState& state) {
   RegisterClassExW(&wc);
 
   constexpr int width = 780;
-  constexpr int height = 610;
+  constexpr int height = 690;
   RECT rect{0, 0, width, height};
   AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                      FALSE, 0);
