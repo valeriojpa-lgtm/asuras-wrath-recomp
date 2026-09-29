@@ -1796,3 +1796,36 @@ new_t104_shutdown_detach = """  // Window/runtime cleanup. Asura routes presente
 
 patch_once(rex_app_cpp, old_t104_shutdown_detach, new_t104_shutdown_detach,
            "T10.4 delegate presenter detach")
+
+
+
+# 16) Theseus T10.4 real hard-exit presentation detach.
+# ReXApp intentionally bypasses OnDestroy on normal window close with
+# std::_Exit(0) to avoid teardown deadlocks. Therefore the presentation detach
+# must occur in OnClosing before TerminateTitle and the hard exit.
+old_t104_hard_exit_close = """void ReXApp::OnClosing(ui::UIEvent& e) {
+  (void)e;
+  REXLOG_INFO("Window closing, shutting down...");
+  shutting_down_.store(true, std::memory_order_release);
+  if (runtime_ && runtime_->kernel_state()) {
+    runtime_->kernel_state()->TerminateTitle();
+  }"""
+
+new_t104_hard_exit_close = """void ReXApp::OnClosing(ui::UIEvent& e) {
+  (void)e;
+  REXLOG_INFO("Window closing, shutting down...");
+  shutting_down_.store(true, std::memory_order_release);
+
+  // The normal Windows path hard-exits below and never reaches OnDestroy.
+  // Disconnect the host presentation surface while the UI objects are still
+  // alive, before TerminateTitle may leave straggler guest threads/locks.
+  if (window_) {
+    OnDetachPresentationPresenter(window_.get());
+  }
+
+  if (runtime_ && runtime_->kernel_state()) {
+    runtime_->kernel_state()->TerminateTitle();
+  }"""
+
+patch_once(rex_app_cpp, old_t104_hard_exit_close, new_t104_hard_exit_close,
+           "T10.4 detach before hard exit")
