@@ -15,7 +15,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T09-exe-stability";
+inline constexpr std::string_view kMilestone = "T09.1-hard-exit-guard";
 
 enum class Backend {
   kReXGlue,
