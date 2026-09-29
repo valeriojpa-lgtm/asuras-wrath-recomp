@@ -73,7 +73,7 @@ jobs:
           if ($app -notmatch "InstallGraphicsBackend\(config, host\.graphics\(\)\.state\(\)\)") {
             throw "T10.2 runtime child does not inject the Theseus-selected backend."
           }
-          if ($bridge -notmatch "LoadGpuPlugin\(\"xenos\", backend\)") {
+          if ($bridge -notmatch 'LoadGpuPlugin\("xenos", backend\)') {
             throw "T10.2 bridge is not the explicit rexgpu-xenos loader."
           }
 
