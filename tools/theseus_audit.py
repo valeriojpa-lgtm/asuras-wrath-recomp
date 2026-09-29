@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T06 Theseus dependency audit.
+"""T07 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -126,10 +126,34 @@ def main() -> int:
     ]
     audio_bridge_boundary = "PASS" if not missing_audio_markers else "FAIL"
 
+    timing_policy_header = read_text(repo / "src" / "platform" / "theseus_timing.h")
+    timing_bridge_source = read_text(repo / "src" / "compat" / "theseus_timing_bridge.cpp")
+    timing_policy_boundary = (
+        "PASS"
+        if "class NativeTimingPolicy" in timing_policy_header
+        and "TimingPolicyState" in timing_policy_header
+        else "FAIL"
+    )
+    timing_bridge_rex_refs = sum(
+        len(pattern.findall(timing_bridge_source)) for pattern in REX_PATTERNS
+    )
+    timing_bridge_markers = (
+        "T07 delegate ReXGlue clock surface to Theseus",
+        "T07 delegate Windows host clock to Theseus",
+    )
+    missing_timing_markers = [
+        marker for marker in timing_bridge_markers if marker not in patch_script
+    ]
+    timing_bridge_boundary = (
+        "PASS"
+        if not missing_timing_markers and timing_bridge_rex_refs == 0
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T06-native-audio-policy",
+        "Milestone: T07-native-timing",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -156,6 +180,7 @@ def main() -> int:
         "  saves/profile  : native",
         "  input policy   : native",
         "  audio policy   : native",
+        "  timing         : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
@@ -163,7 +188,7 @@ def main() -> int:
         "  saves      : native host / rexglue XAM bridge",
         "  video      : guest Bink code / graphics path (not a standalone ReXGlue decoder)",
         "  audio      : native policy / rexglue XMA + SDL bridge",
-        "  timing     : rexglue",
+        "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
         "  threading  : rexglue",
         "  graphics   : rexglue",
         "",
@@ -178,12 +203,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T06 invariant:",
-        "  Audio policy/configuration is Theseus-owned.",
-        "  XMA decoding remains a temporary ReXGlue/FFmpeg bridge.",
-        "  SDL sample submission remains a temporary ReXGlue bridge.",
-        "  The host audio identity is Asura's Wrath, not rexglue.",
-        "  Bink cinematics were audited separately: ReXGlue has no standalone Bink decoder.",
+        "T07 invariant:",
+        "  Host QPC/FILETIME access and guest clock conversion are Theseus-owned.",
+        "  Guest performance frequency remains Xbox-compatible at 50 MHz.",
+        "  ReXGlue retains only the Xbox kernel timing-export ABI bridge.",
+        "  Thread waits/timers remain ReXGlue-owned until T08 threading/sync.",
         "",
     ]
 
@@ -220,6 +244,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 6
+    if (
+        missing_timing_markers
+        or timing_policy_boundary != "PASS"
+        or timing_bridge_rex_refs != 0
+    ):
+        print(
+            "ERROR: T07 native timing core/bridge is incomplete or contaminated.",
+            file=sys.stderr,
+        )
+        return 7
     return 0
 
 
