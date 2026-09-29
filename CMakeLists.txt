@@ -92,6 +92,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_timing.cpp
   src/platform/theseus_threading.cpp
   src/platform/theseus_crash.cpp
+  src/platform/theseus_stability_guard.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
