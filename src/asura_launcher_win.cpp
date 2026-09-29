@@ -11,6 +11,7 @@
 #include "resource.h"
 #include "platform/theseus_config.h"
 #include "platform/theseus_crash.h"
+#include "platform/theseus_heap_probe.h"
 #include "platform/theseus_stability_guard.h"
 #include "platform/theseus_platform.h"
 
@@ -1049,9 +1050,13 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
 
   const bool runtime_child = HasArg(args, "--theseus_runtime_child");
   const bool hard_exit_test = HasArg(args, "--theseus_hard_exit_test");
+  const bool asan_test = HasArg(args, "--theseus_asan_test");
 
   if (runtime_child && hard_exit_test) {
     theseus::stability::TriggerHardExitSelfTest();
+  }
+  if (runtime_child && asan_test) {
+    theseus::heap_probe::TriggerAsanSelfTest();
   }
 
   const bool force_show = !runtime_child &&
@@ -1098,6 +1103,7 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
   theseus::crash::Breadcrumb(stability);
 
   if (!runtime_child) {
+    theseus::heap_probe::ConfigureChildEnvironment();
     theseus::crash::Breadcrumb("guard: launching runtime child");
     if (theseus::stability::LaunchGuardedRuntime(args)) {
       // The guard already waited for the game child. Returning false prevents
