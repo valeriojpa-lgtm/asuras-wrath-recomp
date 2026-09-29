@@ -1309,7 +1309,7 @@ new_t08_events = """class Win32Event : public Win32Handle<Event> {
 };
 
 std::unique_ptr<Event> Event::CreateManualResetEvent(bool initial_state) {
-  auto handle = static_cast<HANDLE>(theseus::sync::CreateEvent(true, initial_state));
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateEventHandle(true, initial_state));
   if (handle) {
     return std::make_unique<Win32Event>(handle);
   }
@@ -1318,7 +1318,7 @@ std::unique_ptr<Event> Event::CreateManualResetEvent(bool initial_state) {
 }
 
 std::unique_ptr<Event> Event::CreateAutoResetEvent(bool initial_state) {
-  auto handle = static_cast<HANDLE>(theseus::sync::CreateEvent(false, initial_state));
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateEventHandle(false, initial_state));
   if (handle) {
     return std::make_unique<Win32Event>(handle);
   }
@@ -1363,7 +1363,7 @@ new_t08_semaphore = """class Win32Semaphore : public Win32Handle<Semaphore> {
 
 std::unique_ptr<Semaphore> Semaphore::Create(int initial_count, int maximum_count) {
   auto handle = static_cast<HANDLE>(
-      theseus::sync::CreateSemaphore(initial_count, maximum_count));
+      theseus::sync::CreateSemaphoreHandle(initial_count, maximum_count));
   if (handle) {
     return std::make_unique<Win32Semaphore>(handle);
   }
@@ -1399,7 +1399,7 @@ new_t08_mutant = """class Win32Mutant : public Win32Handle<Mutant> {
 };
 
 std::unique_ptr<Mutant> Mutant::Create(bool initial_owner) {
-  auto handle = static_cast<HANDLE>(theseus::sync::CreateMutex(initial_owner));
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateMutexHandle(initial_owner));
   if (handle) {
     return std::make_unique<Win32Mutant>(handle);
   }
@@ -1462,7 +1462,7 @@ old_t08_timer_create_manual = """std::unique_ptr<Timer> Timer::CreateManualReset
 }"""
 
 new_t08_timer_create_manual = """std::unique_ptr<Timer> Timer::CreateManualResetTimer() {
-  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimer(true));
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimerHandle(true));
   if (handle) {
     return std::make_unique<Win32Timer>(handle);
   }
@@ -1484,7 +1484,7 @@ old_t08_timer_create_sync = """std::unique_ptr<Timer> Timer::CreateSynchronizati
 }"""
 
 new_t08_timer_create_sync = """std::unique_ptr<Timer> Timer::CreateSynchronizationTimer() {
-  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimer(false));
+  auto handle = static_cast<HANDLE>(theseus::sync::CreateWaitableTimerHandle(false));
   if (handle) {
     return std::make_unique<Win32Timer>(handle);
   }
