@@ -16,7 +16,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T10-native-graphics-boundary";
+inline constexpr std::string_view kMilestone = "T10.2-graphics-backend-bridge";
 
 enum class Backend {
   kReXGlue,
