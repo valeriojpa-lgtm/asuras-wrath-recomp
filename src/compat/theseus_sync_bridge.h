@@ -58,7 +58,7 @@ bool ReleaseMutex(void* handle) noexcept;
 
 void* CreateWaitableTimer(bool manual_reset) noexcept;
 bool SetWaitableTimer(void* handle, std::int64_t due_time_filetime,
-                      std::int32_t period_ms, void* completion_routine,
+                      std::int32_t period_ms, std::uintptr_t completion_routine,
                       void* completion_context) noexcept;
 bool CancelWaitableTimer(void* handle) noexcept;
 
