@@ -1,6 +1,7 @@
 #include "compat/theseus_sync_bridge.h"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <vector>
 
@@ -46,14 +47,12 @@ WaitOutcome TranslateWait(DWORD result) noexcept {
 void Yield() noexcept {
 #if defined(_WIN32)
   SwitchToThread();
-  ::MemoryBarrier();
 #endif
+  std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
 void MemoryBarrier() noexcept {
-#if defined(_WIN32)
-  ::MemoryBarrier();
-#endif
+  std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
 void SleepMicros(std::uint64_t microseconds) noexcept {
