@@ -1,0 +1,223 @@
+name: THESEUS T09.2 - Heap Corruption Probe
+
+on:
+  push:
+    branches:
+      - theseus/t09-2-heap-corruption-probe
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T09.2 diagnostic
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved ReXGlue startup/VFS patches
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T09.2 with AddressSanitizer
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-relwithdebinfo -DASURA_SKIP_CODEGEN=ON -DASURA_ENABLE_ASAN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-relwithdebinfo --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Stage ASan runtime and symbolizer
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-relwithdebinfo"
+
+          $asan = Get-ChildItem "$env:ProgramFiles\LLVM\lib\clang" -Recurse -Filter "clang_rt.asan_dynamic-x86_64.dll" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $asan) {
+            throw "clang_rt.asan_dynamic-x86_64.dll was not found in the ephemeral LLVM installation."
+          }
+          Copy-Item $asan.FullName $build -Force
+          Write-Host "ASan runtime: $($asan.FullName)"
+
+          $symbolizer = Get-Command llvm-symbolizer.exe -ErrorAction Stop
+          Copy-Item $symbolizer.Source (Join-Path $build "llvm-symbolizer.exe") -Force
+          Write-Host "LLVM symbolizer: $($symbolizer.Source)"
+
+      - name: Audit built PE
+        shell: cmd
+        run: |
+          python tools\theseus_pe_audit.py "out/build/win-amd64-relwithdebinfo/Asura's Wrath.exe" --out out/theseus/THESEUS_PE_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Crash diagnostics self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-relwithdebinfo"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_crash_test","--no_launcher" -PassThru -Wait
+          Write-Host "Intentional exception exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $reports = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.txt" -ErrorAction SilentlyContinue)
+          $dumps = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.dmp" -ErrorAction SilentlyContinue)
+
+          if ($reports.Count -lt 1) { throw "T09.2 lost normal crash text reporting." }
+          if ($dumps.Count -lt 1) { throw "T09.2 lost normal minidump reporting." }
+          if ($dumps[0].Length -lt 4096) { throw "T09.2 minidump is unexpectedly small." }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Hard-exit guard self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-relwithdebinfo"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_hard_exit_test","--no_launcher" -PassThru -Wait
+          Write-Host "Guard parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $hardReports = @(Get-ChildItem $crashDir -Filter "TheseusHardExit_*.txt" -ErrorAction SilentlyContinue)
+          if ($hardReports.Count -lt 1) { throw "T09.2 lost hard-exit reporting." }
+
+          $hardText = Get-Content $hardReports[0].FullName -Raw
+          if ($hardText -notmatch "THESEUS_HARD_EXIT_SELF_TEST") {
+            throw "T09.2 hard-exit report did not preserve the self-test exit code."
+          }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: AddressSanitizer heap self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-relwithdebinfo"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_asan_test","--no_launcher" -PassThru -Wait
+          Write-Host "ASan guarded run parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $asanLogs = @(Get-ChildItem $crashDir -Filter "AsanCrash*" -ErrorAction SilentlyContinue)
+          if ($asanLogs.Count -lt 1) {
+            throw "T09.2 AddressSanitizer self-test did not create an ASan report."
+          }
+
+          $allText = ($asanLogs | ForEach-Object { Get-Content $_.FullName -Raw }) -join [Environment]::NewLine
+          if ($allText -notmatch "heap-buffer-overflow") {
+            throw "T09.2 ASan report did not identify the deliberate heap-buffer-overflow."
+          }
+
+          Write-Host "ASan report(s):"
+          $asanLogs | ForEach-Object {
+            Write-Host "  $($_.FullName) ($($_.Length) bytes)"
+          }
+          Write-Host ($allText.Substring(0, [Math]::Min($allText.Length, 8000)))
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Package portable T09.2 diagnostic
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-relwithdebinfo"
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T09_2_DIAGNOSTIC"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item (Join-Path $build "Asura's Wrath.exe") $dist
+          Get-ChildItem $build -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Get-ChildItem $build -Filter *.pdb -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.pdb -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Copy-Item (Join-Path $build "llvm-symbolizer.exe") $dist -Force
+
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T09.2 DIAGNOSTIC",
+            "========================================",
+            "",
+            "Heap Corruption Probe / AddressSanitizer build.",
+            "",
+            "This is NOT the new normal baseline.",
+            "It is intentionally instrumented and may run slower than T09.1.",
+            "",
+            "Place THESEUS_T09_2 next to your existing Data folder.",
+            "Launch Asura's Wrath.exe normally and reproduce ordinary gameplay.",
+            "",
+            "If the historical crash is reproduced, preserve ALL files under:",
+            "  UserData\Logs\Crashes",
+            "and also:",
+            "  UserData\Logs\StabilitySession.txt",
+            "  the newest asura_wrath_recomp_*.log",
+            "",
+            "An ASan hit should create an AsanCrash* report containing the exact",
+            "allocator error and stack information.",
+            "",
+            "No installation or local compiler/debugger is required."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T09_2_DIAGNOSTIC_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          Get-Content "out/theseus/THESEUS_PE_STATUS.txt"
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T09_2_DIAGNOSTIC_PORTABLE.zip"
+          Write-Host "Diagnostic package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T09.2 diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T09_2_DIAGNOSTIC_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T09_2_DIAGNOSTIC_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
