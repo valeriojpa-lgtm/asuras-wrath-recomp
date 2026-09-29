@@ -25,4 +25,8 @@ void AttachPresentationPresenter(rex::ui::Window& window,
   window.SetPresenter(presenter);
 }
 
+void DetachPresentationPresenter(rex::ui::Window& window) {
+  window.SetPresenter(nullptr);
+}
+
 }  // namespace asura::compat
