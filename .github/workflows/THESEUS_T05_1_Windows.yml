@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build portable T05.1.1
+    name: Build portable T05.1
     runs-on: windows-latest
     timeout-minutes: 90
 
@@ -54,10 +54,10 @@ jobs:
           cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
           if errorlevel 1 exit /b %errorlevel%
 
-      - name: Package portable T05.1.1
+      - name: Package portable T05.1
         shell: powershell
         run: |
-          $dist = "out/dist/ASURAS_WRATH_THESEUS_T05_1_1"
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T05_1"
           if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
@@ -71,7 +71,7 @@ jobs:
           Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
 
           $readme = @(
-            "ASURA'S WRATH - THESEUS T04",
+            "ASURA'S WRATH - THESEUS T05.1",
             "===========================",
             "",
             "Launcher Controls polish validation build.",
@@ -93,7 +93,7 @@ jobs:
           )
           Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
 
-          $zip = "out/dist/ASURAS_WRATH_THESEUS_T05_1_1_PORTABLE.zip"
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T05_1_PORTABLE.zip"
           if (Test-Path $zip) { Remove-Item -Force $zip }
           Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
 
@@ -101,14 +101,14 @@ jobs:
         shell: powershell
         run: |
           Get-Content "out/theseus/THESEUS_STATUS.txt"
-          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T05_1_1_PORTABLE.zip"
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T05_1_PORTABLE.zip"
           Write-Host "Portable package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
       - name: Upload portable T05.1
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_THESEUS_T05_1_1_PORTABLE
-          path: out/dist/ASURAS_WRATH_THESEUS_T05_1_1_PORTABLE.zip
+          name: ASURAS_WRATH_THESEUS_T05_1_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T05_1_PORTABLE.zip
           if-no-files-found: error
           retention-days: 30
