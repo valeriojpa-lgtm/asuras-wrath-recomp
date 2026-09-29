@@ -43,20 +43,20 @@ WaitManyResult WaitMany(void* const* handles, std::size_t count,
                         bool wait_all, bool alertable,
                         std::uint64_t timeout_ms) noexcept;
 
-void* CreateEvent(bool manual_reset, bool initial_state) noexcept;
+void* CreateEventHandle(bool manual_reset, bool initial_state) noexcept;
 bool SetEventSignaled(void* handle) noexcept;
 bool ResetEventSignaled(void* handle) noexcept;
 bool PulseEventSignaled(void* handle) noexcept;
 
-void* CreateSemaphore(std::int32_t initial_count,
+void* CreateSemaphoreHandle(std::int32_t initial_count,
                       std::int32_t maximum_count) noexcept;
 bool ReleaseSemaphore(void* handle, std::int32_t release_count,
                       std::int32_t* previous_count) noexcept;
 
-void* CreateMutex(bool initial_owner) noexcept;
+void* CreateMutexHandle(bool initial_owner) noexcept;
 bool ReleaseMutex(void* handle) noexcept;
 
-void* CreateWaitableTimer(bool manual_reset) noexcept;
+void* CreateWaitableTimerHandle(bool manual_reset) noexcept;
 bool SetWaitableTimer(void* handle, std::int64_t due_time_filetime,
                       std::int32_t period_ms, std::uintptr_t completion_routine,
                       void* completion_context) noexcept;
