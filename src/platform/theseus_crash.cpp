@@ -418,6 +418,7 @@ void Install() {
   std::error_code ec;
   std::filesystem::create_directories(g_crash_root, ec);
 
+  SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   SetUnhandledExceptionFilter(UnhandledExceptionFilter);
   std::set_terminate(TerminateHandler);
   std::signal(SIGABRT, AbortHandler);
