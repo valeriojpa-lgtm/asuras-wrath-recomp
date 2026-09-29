@@ -153,6 +153,10 @@ Platform::Platform() {
   // rexgpu-xenos D3D12/Vulkan plugin remains the temporary renderer backend
   // while the graphics boundary is migrated incrementally.
   backends_[static_cast<std::size_t>(Service::kGraphics)] = Backend::kNative;
+
+  // T10.3: host presentation policy and the create/attach boundary belong to
+  // Theseus. SDL Window and backend Presenter remain compatibility objects.
+  backends_[static_cast<std::size_t>(Service::kPresentation)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
