@@ -144,6 +144,10 @@ Platform::Platform() {
   // T07: host/guest clock policy and conversion are project-owned. The Xbox
   // kernel timing exports remain a temporary ABI bridge inside rexruntime.
   backends_[static_cast<std::size_t>(Service::kTiming)] = Backend::kNative;
+
+  // T08: host sleep/yield/TLS/waits/events/semaphores/mutexes/timers are
+  // project-owned. Guest XThread/APC/DPC semantics remain compatibility ABI.
+  backends_[static_cast<std::size_t>(Service::kThreading)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
