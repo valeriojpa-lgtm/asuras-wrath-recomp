@@ -1038,6 +1038,11 @@ bool ShowLauncher(LauncherState& state) {
 bool RunNativeLauncher(std::vector<std::string>& args) {
   theseus::crash::Install();
   theseus::crash::Breadcrumb("launcher: enter");
+
+  if (HasArg(args, "--theseus_crash_test")) {
+    theseus::crash::TriggerSelfTestCrash();
+  }
+
   SetProcessDPIAware();
 
   const bool force_show = HasArg(args, "--launcher") ||
