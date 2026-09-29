@@ -29,17 +29,12 @@ if(ASURA_ENABLE_ASAN)
     message(FATAL_ERROR "T09.2 AddressSanitizer probe is currently validated only on Windows")
   endif()
 
-  # Keep this close enough to the Release build to reproduce lifetime bugs,
-  # while retaining useful stacks for allocator diagnostics.
-  add_compile_options(
-    -fsanitize=address
-    -fno-omit-frame-pointer
-    -fno-optimize-sibling-calls
-    -O2
-    -g
-  )
-  add_link_options(-fsanitize=address)
-  add_compile_definitions(ASURA_HEAP_PROBE=1)
+  # T09.2b deliberately does NOT apply ASan directory-wide. ReXGlue, the
+  # recompiled guest object target and GPU plugins use memory layouts / fixed
+  # mappings that must remain identical to the validated T09.1 runtime while
+  # we establish a usable diagnostic baseline. The host executable receives
+  # the sanitizer flags below, after add_executable(), so coverage can be
+  # widened one module at a time once this build is runtime-valid.
 endif()
 
 if(NOT REXSDK_DIR)
@@ -130,6 +125,19 @@ if(ANDROID)
   target_link_libraries(asura_wrath_recomp PRIVATE log SDL3::SDL3)
 else()
   add_executable(asura_wrath_recomp ${ASURAWRATH_SOURCES})
+endif()
+
+if(ASURA_ENABLE_ASAN)
+  # Host-only ASan probe. Keep generated guest/ReXGlue/GPU targets untouched.
+  target_compile_options(asura_wrath_recomp PRIVATE
+    -fsanitize=address
+    -fno-omit-frame-pointer
+    -fno-optimize-sibling-calls
+    -O2
+    -g
+  )
+  target_link_options(asura_wrath_recomp PRIVATE -fsanitize=address)
+  target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_HEAP_PROBE=1)
 endif()
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
