@@ -1,4 +1,5 @@
 #include "platform/theseus_stability_guard.h"
+#include "platform/theseus_platform.h"
 
 #include <algorithm>
 #include <chrono>
@@ -189,7 +190,7 @@ void WriteHardExitReport(
       file,
       "ASURA'S WRATH - THESEUS HARD EXIT REPORT\r\n"
       "========================================\r\n"
-      "Milestone: T09.1-hard-exit-guard\r\n"
+      "Milestone: %s\r\n"
       "ChildPID: %lu\r\n"
       "ExitCode: 0x%08lX (%s)\r\n"
       "CleanRuntimeShutdownBreadcrumb: %s\r\n"
@@ -206,6 +207,7 @@ void WriteHardExitReport(
       "\r\n"
       "Session log:\r\n"
       "  UserData\\Logs\\StabilitySession.txt\r\n",
+      kMilestone.data(),
       static_cast<unsigned long>(child_pid),
       static_cast<unsigned long>(exit_code),
       ExitCodeName(exit_code),
