@@ -1668,3 +1668,68 @@ else:
 
 for old, new, label in _t093_methods:
     patch_once(input_system_cpp, old, new, label)
+
+
+
+# 14) Theseus T10.3 native presentation boundary.
+# ReXApp keeps the default SDK behavior for other projects, but exposes two
+# narrow hooks so Asura/Theseus can own host-window creation and the
+# window<->presenter attachment without replacing the validated renderer.
+rex_app_h = Path("tools/rexglue/include/rex/rex_app.h")
+rex_app_cpp = Path("tools/rexglue/src/ui/rex_app.cpp")
+
+old_t103_presentation_hooks = """  virtual std::unique_ptr<ui::ImmediateDrawer> OnCreateImmediateDrawer() { return nullptr; }
+
+  // --- Window event hooks (delivered on the UI thread) ---"""
+
+new_t103_presentation_hooks = """  virtual std::unique_ptr<ui::ImmediateDrawer> OnCreateImmediateDrawer() { return nullptr; }
+
+  // Host presentation boundary. The default implementation preserves the SDK
+  // window/presenter path; recomp projects may override these two narrow hooks
+  // to own host-window policy without reimplementing ReXApp's lifecycle.
+  virtual std::unique_ptr<ui::Window> OnCreatePresentationWindow(
+      std::string_view title, uint32_t default_width, uint32_t default_height);
+  virtual void OnAttachPresentationPresenter(ui::Window* window,
+                                             ui::Presenter* presenter);
+
+  // --- Window event hooks (delivered on the UI thread) ---"""
+
+patch_once(rex_app_h, old_t103_presentation_hooks, new_t103_presentation_hooks,
+           "T10.3 presentation hooks")
+
+old_t103_presentation_defs = """bool ReXApp::SetupPresentation() {
+  config_.gpu_plugin = REXCVAR_GET(gpu_plugin);"""
+
+new_t103_presentation_defs = """std::unique_ptr<ui::Window> ReXApp::OnCreatePresentationWindow(
+    std::string_view title, uint32_t default_width, uint32_t default_height) {
+  return ui::Window::Create(app_context(), title, default_width, default_height);
+}
+
+void ReXApp::OnAttachPresentationPresenter(ui::Window* window,
+                                           ui::Presenter* presenter) {
+  if (window) {
+    window->SetPresenter(presenter);
+  }
+}
+
+bool ReXApp::SetupPresentation() {
+  config_.gpu_plugin = REXCVAR_GET(gpu_plugin);"""
+
+patch_once(rex_app_cpp, old_t103_presentation_defs, new_t103_presentation_defs,
+           "T10.3 default presentation hook implementations")
+
+old_t103_window_create = """  // Create window
+  window_ = rex::ui::Window::Create(app_context(), GetName(), 1280, 720);"""
+
+new_t103_window_create = """  // Create the host window through the presentation boundary. The default
+  // hook still calls ui::Window::Create; Asura overrides it via Theseus.
+  window_ = OnCreatePresentationWindow(GetName(), 1280, 720);"""
+
+patch_once(rex_app_cpp, old_t103_window_create, new_t103_window_create,
+           "T10.3 delegate host window creation")
+
+old_t103_presenter_attach = """    window_->SetPresenter(presenter);"""
+new_t103_presenter_attach = """    OnAttachPresentationPresenter(window_.get(), presenter);"""
+
+patch_once(rex_app_cpp, old_t103_presenter_attach, new_t103_presenter_attach,
+           "T10.3 delegate presenter attachment")
