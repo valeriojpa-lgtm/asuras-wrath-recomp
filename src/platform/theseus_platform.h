@@ -11,10 +11,11 @@
 #include "platform/theseus_input.h"
 #include "platform/theseus_saves.h"
 #include "platform/theseus_timing.h"
+#include "platform/theseus_threading.h"
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T07-native-timing";
+inline constexpr std::string_view kMilestone = "T08-native-threading-sync";
 
 enum class Backend {
   kReXGlue,
@@ -74,6 +75,8 @@ class Platform final {
   [[nodiscard]] const NativeAudioPolicy& audio() const noexcept { return audio_; }
   [[nodiscard]] NativeTimingPolicy& timing() noexcept { return timing_; }
   [[nodiscard]] const NativeTimingPolicy& timing() const noexcept { return timing_; }
+  [[nodiscard]] NativeThreadingService& threading() noexcept { return threading_; }
+  [[nodiscard]] const NativeThreadingService& threading() const noexcept { return threading_; }
   [[nodiscard]] Backend backend(Service service) const noexcept;
 
  private:
@@ -85,6 +88,7 @@ class Platform final {
   NativeInputPolicy input_{};
   NativeAudioPolicy audio_{};
   NativeTimingPolicy timing_{};
+  NativeThreadingService threading_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
   bool initialized_ = false;
 };
