@@ -1494,3 +1494,51 @@ new_t08_timer_create_sync = """std::unique_ptr<Timer> Timer::CreateSynchronizati
 
 patch_once(threading_win_cpp, old_t08_timer_create_sync, new_t08_timer_create_sync,
            "T08 delegate synchronization timers to Theseus")
+
+
+# 12) Theseus T09 crash diagnostics. Install the process-wide crash handler
+# before the native launcher and before ReXGlue initializes any subsystems.
+windowed_main = Path("tools/rexglue/src/ui/windowed_app_main_sdl.cpp")
+
+old_t09_crash_include = """#include <rex/platform.h>
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)
+#include "asura_launcher_win.h"
+#endif
+#include <rex/ui/windowed_app.h>"""
+
+new_t09_crash_include = """#include <rex/platform.h>
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)
+#include "asura_launcher_win.h"
+#include "platform/theseus_crash.h"
+#endif
+#include <rex/ui/windowed_app.h>"""
+
+patch_once(windowed_main, old_t09_crash_include, new_t09_crash_include,
+           "T09 early crash diagnostics include")
+
+old_t09_console_entry = """int main(int argc, char* argv[]) {
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)"""
+
+new_t09_console_entry = """int main(int argc, char* argv[]) {
+#if REX_PLATFORM_WIN32 && defined(ASURA_NATIVE_LAUNCHER)
+  theseus::crash::Install();
+  theseus::crash::Breadcrumb("entry: console main");
+"""
+
+patch_once(windowed_main, old_t09_console_entry, new_t09_console_entry,
+           "T09 install diagnostics before console launcher")
+
+old_t09_windows_entry = """int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR command_line,
+                    int show_cmd) {
+  (void)hinstance;"""
+
+new_t09_windows_entry = """int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR command_line,
+                    int show_cmd) {
+#if defined(ASURA_NATIVE_LAUNCHER)
+  theseus::crash::Install();
+  theseus::crash::Breadcrumb("entry: wWinMain");
+#endif
+  (void)hinstance;"""
+
+patch_once(windowed_main, old_t09_windows_entry, new_t09_windows_entry,
+           "T09 install diagnostics before Windows launcher")
