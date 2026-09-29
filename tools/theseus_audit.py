@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T09 Theseus dependency audit.
+"""T09.1 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -209,10 +209,28 @@ def main() -> int:
         else "FAIL"
     )
 
+    guard_header = read_text(repo / "src" / "platform" / "theseus_stability_guard.h")
+    guard_source = read_text(repo / "src" / "platform" / "theseus_stability_guard.cpp")
+    launcher_source = read_text(repo / "src" / "asura_launcher_win.cpp")
+    guard_rex_refs = sum(
+        len(pattern.findall(guard_source)) for pattern in REX_PATTERNS
+    )
+    guard_boundary = (
+        "PASS"
+        if "LaunchGuardedRuntime" in guard_header
+        and "TriggerHardExitSelfTest" in guard_header
+        and "CreateProcessW" in guard_source
+        and "GetExitCodeProcess" in guard_source
+        and "TheseusHardExit_" in guard_source
+        and "--theseus_runtime_child" in launcher_source
+        and guard_rex_refs == 0
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T09-exe-stability",
+        "Milestone: T09.1-hard-exit-guard",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -242,6 +260,7 @@ def main() -> int:
         "  timing         : native",
         "  threading sync : native",
         "  crash telemetry : native",
+        "  hard-exit guard  : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
@@ -264,13 +283,13 @@ def main() -> int:
 
     lines += [
         "",
-        "T09 invariant:",
-        "  The Windows executable is expected to be x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
-        "  The Windows build uses the GUI subsystem; no console window is required.",
-        "  Process-wide crash diagnostics are installed before the native launcher.",
-        "  Unhandled failures produce portable text reports plus minidumps under UserData/Logs/Crashes.",
-        "  StabilitySession.txt records launcher/runtime/focus breadcrumbs leading up to a crash.",
-        "  T08 host synchronization remains native; XThread/APC/DPC guest semantics remain compatibility code.",
+        "T09.1 invariant:",
+        "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
+        "  In-process unhandled failures still produce text reports plus minidumps.",
+        "  The launcher survives as an external guard while the game runs in a normal child process.",
+        "  Hard exits that bypass SEH produce TheseusHardExit reports with the child exit code.",
+        "  The child is not debugged, preserving normal timing and IsDebuggerPresent behavior.",
+        "  StabilitySession.txt remains the child runtime breadcrumb log.",
         "",
     ]
 
@@ -333,6 +352,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 9
+    if guard_boundary != "PASS":
+        print(
+            "ERROR: T09.1 hard-exit guard is incomplete or contaminated.",
+            file=sys.stderr,
+        )
+        return 10
     return 0
 
 
