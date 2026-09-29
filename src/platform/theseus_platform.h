@@ -10,10 +10,11 @@
 #include "platform/theseus_filesystem.h"
 #include "platform/theseus_input.h"
 #include "platform/theseus_saves.h"
+#include "platform/theseus_timing.h"
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T06-native-audio-policy";
+inline constexpr std::string_view kMilestone = "T07-native-timing";
 
 enum class Backend {
   kReXGlue,
@@ -71,6 +72,8 @@ class Platform final {
   [[nodiscard]] const NativeInputPolicy& input() const noexcept { return input_; }
   [[nodiscard]] NativeAudioPolicy& audio() noexcept { return audio_; }
   [[nodiscard]] const NativeAudioPolicy& audio() const noexcept { return audio_; }
+  [[nodiscard]] NativeTimingPolicy& timing() noexcept { return timing_; }
+  [[nodiscard]] const NativeTimingPolicy& timing() const noexcept { return timing_; }
   [[nodiscard]] Backend backend(Service service) const noexcept;
 
  private:
@@ -81,6 +84,7 @@ class Platform final {
   NativeSaveSystem saves_{};
   NativeInputPolicy input_{};
   NativeAudioPolicy audio_{};
+  NativeTimingPolicy timing_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
   bool initialized_ = false;
 };
