@@ -61,6 +61,9 @@ if(TARGET rexruntime)
   )
 endif()
 if(TARGET rexcore)
+  target_sources(rexcore PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/compat/theseus_sync_bridge.cpp"
+  )
   target_include_directories(rexcore PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
@@ -87,6 +90,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_input.cpp
   src/platform/theseus_audio.cpp
   src/platform/theseus_timing.cpp
+  src/platform/theseus_threading.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
