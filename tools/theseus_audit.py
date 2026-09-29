@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T04.1 Theseus dependency audit.
+"""T05 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -93,10 +93,28 @@ def main() -> int:
     ]
     save_bridge_boundary = "PASS" if not missing_save_markers else "FAIL"
 
+    input_bridge_markers = (
+        "T05 Theseus cursor policy cvar",
+        "T05 hide cursor on focused game window",
+        "T05 restore cursor on focus loss",
+    )
+    missing_input_markers = [
+        marker for marker in input_bridge_markers if marker not in patch_script
+    ]
+    input_bridge_boundary = "PASS" if not missing_input_markers else "FAIL"
+
+    input_policy_header = read_text(repo / "src" / "platform" / "theseus_input.h")
+    input_policy_boundary = (
+        "PASS"
+        if "class NativeInputPolicy" in input_policy_header
+        and "struct InputBindings" in input_policy_header
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T04.1-first-run-polish",
+        "Milestone: T05-native-input",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -111,16 +129,19 @@ def main() -> int:
         f"ReXGlue filesystem refs outside compatibility bridge: {fs_refs_outside_bridge}",
         f"ReXGlue filesystem refs inside compatibility bridge: {fs_bridge_refs}",
         f"Save/profile compatibility bridge: {save_bridge_boundary}",
+        f"Native input policy boundary: {input_policy_boundary}",
+        f"Input compatibility bridge: {input_bridge_boundary}",
         "",
-        "Native host facilities (T04):",
+        "Native host facilities (T05):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
         "  saves/profile  : native",
+        "  input policy   : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
-        "  input      : rexglue",
+        "  input      : native policy / rexglue physical-driver + XAM bridge",
         "  saves      : native host / rexglue XAM bridge",
         "  video      : rexglue",
         "  audio      : rexglue",
@@ -139,12 +160,12 @@ def main() -> int:
 
     lines += [
         "",
-        "T04.1 invariant:",
-        "  Physical save/profile policy is Theseus-owned under UserData/Saves.",
-        "  Existing Xbox save package format is preserved for compatibility.",
-        "  ReXGlue remains only as the temporary XAM save/profile ABI bridge.",
-        "  Native first-run state drives Asura's one-shot create prompt suppression.",
-        "  SavedGame enumeration remains only as a compatibility fallback.",
+        "T05 invariant:",
+        "  Input policy, bindings and mouse behavior are Theseus-owned.",
+        "  SDL/XInput physical drivers remain a temporary compatibility bridge.",
+        "  Guest XamInput* calls remain the temporary Xbox input ABI.",
+        "  Cursor hides only while the game window has focus and restores on focus loss.",
+        "  Mouse-look remains opt-in and independent from cursor visibility.",
         "",
     ]
 
@@ -169,6 +190,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 4
+    if missing_input_markers or input_policy_boundary != "PASS":
+        print(
+            "ERROR: T05 native input policy/bridge is incomplete.",
+            file=sys.stderr,
+        )
+        return 5
     return 0
 
 
