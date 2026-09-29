@@ -676,3 +676,65 @@ new_message_result = """  // Project-specific PC polish. T04.1 receives an expli
 
 patch_once(xam_ui, old_message_result, new_message_result,
            "T04 auto-confirm first save creation")
+
+
+# 8) Theseus T05 input-policy bridge. The host input policy and bindings live
+# in src/platform; ReXGlue temporarily supplies the physical SDL/XInput drivers
+# and the Xbox XAM input ABI.
+mnk_cpp = Path("tools/rexglue/src/input/mnk/mnk_input_driver.cpp")
+
+old_t05_cursor_cvar = """REXCVAR_DEFINE_DOUBLE(mnk_sensitivity, 1.0, "Input", "Mouse sensitivity for right stick")
+    .range(0.01, 10.0);"""
+
+new_t05_cursor_cvar = """REXCVAR_DEFINE_DOUBLE(mnk_sensitivity, 1.0, "Input", "Mouse sensitivity for right stick")
+    .range(0.01, 10.0);
+REXCVAR_DEFINE_BOOL(theseus_hide_cursor_in_game, true, "Theseus",
+                    "Hide the pointer while the Asura game window has focus");"""
+
+patch_once(mnk_cpp, old_t05_cursor_cvar, new_t05_cursor_cvar,
+           "T05 Theseus cursor policy cvar")
+
+old_t05_window_attach = """    window->AddInputListener(this, window_z_order());
+    window->AddListener(this);
+  }
+}"""
+
+new_t05_window_attach = """    window->AddInputListener(this, window_z_order());
+    window->AddListener(this);
+    if (REXCVAR_GET(theseus_hide_cursor_in_game) && window->HasFocus()) {
+      window->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
+    }
+  }
+}"""
+
+patch_once(mnk_cpp, old_t05_window_attach, new_t05_window_attach,
+           "T05 hide cursor on focused game window")
+
+old_t05_lost_focus = """  if (attached_window_) {
+    ReleaseMouseCaptureFromUIThread(attached_window_);
+  }
+}
+
+void MnkInputDriver::OnGotFocus(rex::ui::UISetupEvent&) {
+  has_focus_ = true;
+}"""
+
+new_t05_lost_focus = """  if (attached_window_) {
+    ReleaseMouseCaptureFromUIThread(attached_window_);
+    if (REXCVAR_GET(theseus_hide_cursor_in_game)) {
+      attached_window_->SetCursorVisibility(
+          rex::ui::Window::CursorVisibility::kVisible);
+    }
+  }
+}
+
+void MnkInputDriver::OnGotFocus(rex::ui::UISetupEvent&) {
+  has_focus_ = true;
+  if (attached_window_ && REXCVAR_GET(theseus_hide_cursor_in_game)) {
+    attached_window_->SetCursorVisibility(
+        rex::ui::Window::CursorVisibility::kHidden);
+  }
+}"""
+
+patch_once(mnk_cpp, old_t05_lost_focus, new_t05_lost_focus,
+           "T05 restore cursor on focus loss")
