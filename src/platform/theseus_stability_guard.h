@@ -13,4 +13,8 @@ namespace theseus::stability {
 // The caller should then exit instead of starting a second runtime in-process.
 bool LaunchGuardedRuntime(const std::vector<std::string>& runtime_args);
 
+// CI/developer-only validation for hard process termination. Unlike the T09
+// exception self-test, this intentionally bypasses all in-process handlers.
+[[noreturn]] void TriggerHardExitSelfTest();
+
 }  // namespace theseus::stability
