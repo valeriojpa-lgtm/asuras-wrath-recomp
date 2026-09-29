@@ -11,6 +11,7 @@
 #include "resource.h"
 #include "platform/theseus_config.h"
 #include "platform/theseus_crash.h"
+#include "platform/theseus_stability_guard.h"
 #include "platform/theseus_platform.h"
 
 #include <windows.h>
@@ -216,7 +217,8 @@ bool HasArg(const std::vector<std::string>& args, std::string_view wanted) {
 
 void RemoveCustomLauncherArgs(std::vector<std::string>& args) {
   std::erase_if(args, [](const std::string& arg) {
-    return arg == "--launcher" || arg == "--no_launcher";
+    return arg == "--launcher" || arg == "--no_launcher" ||
+           arg == "--theseus_runtime_child";
   });
 }
 
@@ -1086,6 +1088,19 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       " vsync=" + (state.settings.vsync ? "1" : "0") +
       " async_shaders=" + (state.settings.async_shaders ? "1" : "0");
   theseus::crash::Breadcrumb(stability);
+
+  if (!runtime_child) {
+    theseus::crash::Breadcrumb("guard: launching runtime child");
+    if (theseus::stability::LaunchGuardedRuntime(args)) {
+      // The guard already waited for the game child. Returning false prevents
+      // this launcher/guard process from starting a second runtime in-process.
+      return false;
+    }
+    theseus::crash::Breadcrumb("guard: child launch failed; falling back in-process");
+  } else {
+    theseus::crash::Breadcrumb("guard: runtime child active");
+  }
+
   return true;
 }
 
