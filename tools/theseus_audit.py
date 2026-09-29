@@ -261,10 +261,30 @@ def main() -> int:
         else "FAIL"
     )
 
+    graphics_bridge_header = read_text(
+        repo / "src" / "compat" / "rexglue_graphics_bridge.h"
+    )
+    graphics_bridge_source = read_text(
+        repo / "src" / "compat" / "rexglue_graphics_bridge.cpp"
+    )
+    app_header = read_text(repo / "src" / "asurawrath_app.h")
+    graphics_backend_bridge = (
+        "PASS"
+        if "InstallGraphicsBackend" in graphics_bridge_header
+        and "LoadGpuPlugin" in graphics_bridge_source
+        and 'LoadGpuPlugin("xenos", backend)' in graphics_bridge_source
+        and "config.gpu_plugin.clear()" in graphics_bridge_source
+        and "LoadConfig(host.paths().config / \"Asura.ini\"" in app_header
+        and "host.graphics().Configure(native_config.MakeGraphicsPolicy())" in app_header
+        and "InstallGraphicsBackend(config, host.graphics().state())" in app_header
+        and "src/compat/rexglue_graphics_bridge.cpp" in cmake_source
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T10-native-graphics-boundary",
+        "Milestone: T10.2-graphics-backend-bridge",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -283,8 +303,9 @@ def main() -> int:
         f"Input compatibility bridge: {input_bridge_boundary}",
         f"Native audio policy boundary: {audio_policy_boundary}",
         f"Audio compatibility bridge: {audio_bridge_boundary}",
+        f"Graphics backend compatibility bridge: {graphics_backend_bridge}",
         "",
-        "Native host facilities (T10):",
+        "Native host facilities (T10.2):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -306,7 +327,7 @@ def main() -> int:
         "  audio      : native policy / rexglue XMA + SDL bridge",
         "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
         "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
-        "  graphics   : native policy / rexgpu-xenos renderer compatibility backend",
+        "  graphics   : native policy + explicit backend injection / rexgpu-xenos compatibility renderer",
         "",
         "Host files with direct ReXGlue references:",
     ]
@@ -319,10 +340,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T10 invariant:",
-        "  T09.3 remains the immutable validated stability baseline.",
-        "  Theseus owns graphics policy: backend, adapter, VSync and async shader selection.",
-        "  rexgpu-xenos remains the temporary validated D3D12/Vulkan renderer backend.",
+        "T10.2 invariant:",
+        "  T10 RUN 01 remains the validated graphics-policy baseline.",
+        "  The runtime child reconstructs graphics policy from Theseus-owned Asura.ini.",
+        "  Theseus explicitly injects the selected rexgpu-xenos backend into RuntimeConfig.",
+        "  ReXApp legacy plugin loading remains only as a safety fallback.",
         "  No Xenos translation, command processor, shader or presentation behavior is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
         "  In-process unhandled failures still produce text reports plus minidumps.",
@@ -409,6 +431,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 12
+    if graphics_backend_bridge != "PASS":
+        print(
+            "ERROR: T10.2 graphics backend compatibility bridge is incomplete.",
+            file=sys.stderr,
+        )
+        return 13
     return 0
 
 
