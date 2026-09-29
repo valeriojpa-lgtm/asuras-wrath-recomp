@@ -2,6 +2,8 @@
 
 #include <filesystem>
 
+#include "platform/theseus_input.h"
+
 namespace theseus {
 
 struct Config {
@@ -18,6 +20,22 @@ struct Config {
 
   bool mnk = true;
   int input_backend = 0;  // 0 = SDL, 1 = XInput.
+  bool mouse_look = false;
+  double mouse_sensitivity = 1.0;
+  bool hide_cursor_in_game = true;
+  InputBindings keybinds{};
+
+  [[nodiscard]] InputPolicyState MakeInputPolicy() const {
+    InputPolicyState policy;
+    policy.backend = input_backend == 1 ? InputBackend::kXInput
+                                        : InputBackend::kSDL;
+    policy.keyboard_mouse = mnk;
+    policy.mouse_look = mouse_look;
+    policy.mouse_sensitivity = mouse_sensitivity;
+    policy.hide_cursor_in_game = hide_cursor_in_game;
+    policy.bindings = keybinds;
+    return policy;
+  }
 
   int language = 1;
   int country = 103;
