@@ -1,6 +1,6 @@
 # Asura's Wrath — Theseus PC Port
 
-## T07: Native Timing
+## T08: Native Threading / Synchronization
 
 T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
 portable path discovery and launcher configuration into that boundary. T03
@@ -331,3 +331,44 @@ dependencies and can move out when that ABI bridge is removed.
 T07 does **not** migrate wait objects, timer objects, events, semaphores,
 thread scheduling or synchronization. Those remain the scope of the following
 threading/synchronization milestone.
+
+
+## T08 host synchronization boundary
+
+T08 moves the Windows synchronization foundation into project-owned Theseus
+code while preserving the existing guest Xbox kernel object ABI.
+
+```
+Asura / UE3
+   |
+Xbox kernel thread/sync exports
+   |
+ReXGlue XThread / XEvent / XSemaphore / XMutant / XTimer wrappers
+                    [temporary guest ABI + semantics]
+   |
+Theseus sync bridge [native/project-owned]
+   |
+Windows primitives  [native host]
+```
+
+Theseus owns in T08:
+- yield and memory barriers;
+- normal and alertable sleep;
+- host TLS allocation/access;
+- single waits, signal-and-wait and multiple waits;
+- manual/auto-reset events;
+- semaphores;
+- mutexes;
+- waitable timers and cancellation;
+- native handle lifetime for those wrappers.
+
+Still temporary compatibility code:
+- Xbox XThread lifecycle and guest thread structures;
+- APC and DPC semantics;
+- guest affinity/priority translation;
+- guest IRQL/spinlock semantics;
+- the public rex::thread wrapper classes used by the Xbox kernel layer.
+
+The sync core under `src/compat/theseus_sync_bridge.*` contains no ReXGlue
+dependency and is temporarily compiled into rexcore while the compatibility
+wrappers remain.
