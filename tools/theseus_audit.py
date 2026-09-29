@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T07 Theseus dependency audit.
+"""T08 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -150,10 +150,48 @@ def main() -> int:
         else "FAIL"
     )
 
+    threading_service_header = read_text(
+        repo / "src" / "platform" / "theseus_threading.h"
+    )
+    sync_bridge_source = read_text(
+        repo / "src" / "compat" / "theseus_sync_bridge.cpp"
+    )
+    threading_policy_boundary = (
+        "PASS"
+        if "class NativeThreadingService" in threading_service_header
+        and "host_sync_native" in threading_service_header
+        else "FAIL"
+    )
+    sync_bridge_rex_refs = sum(
+        len(pattern.findall(sync_bridge_source)) for pattern in REX_PATTERNS
+    )
+    sync_bridge_markers = (
+        "T08 synchronization bridge include",
+        "T08 delegate yield sleep and TLS to Theseus",
+        "T08 delegate native handle lifetime to Theseus",
+        "T08 delegate waits to Theseus",
+        "T08 delegate events to Theseus",
+        "T08 delegate semaphores to Theseus",
+        "T08 delegate mutexes to Theseus",
+        "T08 delegate one-shot timers to Theseus",
+        "T08 delegate repeating timers to Theseus",
+        "T08 delegate timer cancellation to Theseus",
+        "T08 delegate manual timers to Theseus",
+        "T08 delegate synchronization timers to Theseus",
+    )
+    missing_sync_markers = [
+        marker for marker in sync_bridge_markers if marker not in patch_script
+    ]
+    sync_bridge_boundary = (
+        "PASS"
+        if not missing_sync_markers and sync_bridge_rex_refs == 0
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T07-native-timing",
+        "Milestone: T08-native-threading-sync",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -181,6 +219,7 @@ def main() -> int:
         "  input policy   : native",
         "  audio policy   : native",
         "  timing         : native",
+        "  threading sync : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
@@ -189,7 +228,7 @@ def main() -> int:
         "  video      : guest Bink code / graphics path (not a standalone ReXGlue decoder)",
         "  audio      : native policy / rexglue XMA + SDL bridge",
         "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
-        "  threading  : rexglue",
+        "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
         "  graphics   : rexglue",
         "",
         "Host files with direct ReXGlue references:",
@@ -203,11 +242,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T07 invariant:",
-        "  Host QPC/FILETIME access and guest clock conversion are Theseus-owned.",
-        "  Guest performance frequency remains Xbox-compatible at 50 MHz.",
-        "  ReXGlue retains only the Xbox kernel timing-export ABI bridge.",
-        "  Thread waits/timers remain ReXGlue-owned until T08 threading/sync.",
+        "T08 invariant:",
+        "  Host yield/sleep/TLS and synchronization waits are Theseus-owned.",
+        "  Host Event/Semaphore/Mutex/WaitableTimer operations are Theseus-owned.",
+        "  ReXGlue retains public rex::thread wrappers and Xbox kernel object ABI.",
+        "  XThread lifecycle, APC/DPC and guest scheduling semantics remain compatibility code.",
         "",
     ]
 
@@ -254,6 +293,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 7
+    if (
+        missing_sync_markers
+        or threading_policy_boundary != "PASS"
+        or sync_bridge_rex_refs != 0
+    ):
+        print(
+            "ERROR: T08 native synchronization core/bridge is incomplete or contaminated.",
+            file=sys.stderr,
+        )
+        return 8
     return 0
 
 
