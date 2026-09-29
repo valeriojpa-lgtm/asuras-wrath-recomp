@@ -635,3 +635,56 @@ T11 strong validation resolutions:
 - 2560x1600 (16:10)
 - 3440x1440 (21:9)
 - standard 16:9 modes as compatibility references
+
+
+## T11: Native Display Modes
+
+T11 begins the PC display layer on top of the frozen T10.4 presentation
+lifecycle.
+
+The first cut moves physical monitor and mode discovery out of fixed launcher
+tables and into a project-owned Win32 service:
+
+```
+Win32 display APIs
+  |-- EnumDisplayDevicesW
+  |-- EnumDisplaySettingsW
+  v
+Theseus NativeDisplayService
+  |-- attached desktop monitors
+  |-- primary monitor identity
+  |-- current mode
+  |-- supported width/height/refresh tuples
+  v
+Native launcher
+  |-- monitor selector
+  |-- resolution list rebuilt from selected monitor
+  v
+Theseus presentation policy
+  v
+SDL monitor-index compatibility bridge
+```
+
+The fixed resolution table no longer governs normal Windows startup. A
+fallback set remains only for systems where native enumeration fails and
+contains:
+
+- 1280x720
+- 1600x900
+- 1920x1080
+- 1920x1200
+- 2560x1440
+- 2560x1600
+- 3440x1440
+- 3840x2160
+
+Strong validation modes remain:
+- 1920x1200 (16:10)
+- 2560x1600 (16:10)
+- 3440x1440 (21:9)
+
+This stage intentionally does not change Xenos guest rendering, shader
+translation, swapchain implementation or HUD/aspect-ratio behavior yet.
+Monitor selection is persisted by Theseus; the selected monitor ordinal is
+still passed to SDL as a compatibility bridge until the concrete window layer
+is replaced.
