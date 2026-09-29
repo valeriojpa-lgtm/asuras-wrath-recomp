@@ -1542,3 +1542,135 @@ new_t09_windows_entry = """int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hi
 
 patch_once(windowed_main, old_t09_windows_entry, new_t09_windows_entry,
            "T09 install diagnostics before Windows launcher")
+
+
+# 13) Theseus T09.2c input serialization probe.
+# ASan repeatedly caught DeviceInfo/std::string destruction from concurrent
+# XamInputGetState -> InputSystem::RefreshDevices paths. Serialize the public
+# input surface so devices_, device_owners_, assignment_ and active_devices_
+# cannot be mutated concurrently by multiple guest XThreads.
+input_system_h = Path("tools/rexglue/include/rex/input/input_system.h")
+
+old_t092c_mutex_include = """#include <memory>
+#include <vector>"""
+
+new_t092c_mutex_include = """#include <memory>
+#include <mutex>
+#include <vector>"""
+
+patch_once(input_system_h, old_t092c_mutex_include, new_t092c_mutex_include,
+           "T09.2c InputSystem mutex include")
+
+old_t092c_mutex_member = """  rex::ui::Window* window_ = nullptr;
+
+  std::vector<std::unique_ptr<InputDriver>> drivers_;"""
+
+new_t092c_mutex_member = """  rex::ui::Window* window_ = nullptr;
+
+  // Guest XThreads may poll XInput concurrently. RefreshDevices mutates
+  // vectors containing std::string-bearing DeviceInfo objects, so all public
+  // stateful input operations are serialized through this host mutex.
+  std::mutex state_mutex_;
+
+  std::vector<std::unique_ptr<InputDriver>> drivers_;"""
+
+patch_once(input_system_h, old_t092c_mutex_member, new_t092c_mutex_member,
+           "T09.2c InputSystem state mutex")
+
+input_system_cpp = Path("tools/rexglue/src/input/input_system.cpp")
+
+_t092c_methods = [
+    (
+        """void InputSystem::Shutdown() {
+  // device_owners_ holds raw driver pointers.""",
+        """void InputSystem::Shutdown() {
+  std::scoped_lock lock(state_mutex_);
+  // device_owners_ holds raw driver pointers.""",
+        "T09.2c serialize input shutdown",
+    ),
+    (
+        """void InputSystem::AddDriver(std::unique_ptr<InputDriver> driver) {
+  drivers_.push_back(std::move(driver));""",
+        """void InputSystem::AddDriver(std::unique_ptr<InputDriver> driver) {
+  std::scoped_lock lock(state_mutex_);
+  drivers_.push_back(std::move(driver));""",
+        "T09.2c serialize driver add",
+    ),
+    (
+        """void InputSystem::AttachWindow(rex::ui::Window* window) {
+  window_ = window_;""",
+        """void InputSystem::AttachWindow(rex::ui::Window* window) {
+  std::scoped_lock lock(state_mutex_);
+  window_ = window_;""",
+        "T09.2c serialize window attach",
+    ),
+    (
+        """void InputSystem::SetActiveCallback(std::function<bool()> callback) {
+  for (auto& driver : drivers_) {""",
+        """void InputSystem::SetActiveCallback(std::function<bool()> callback) {
+  std::scoped_lock lock(state_mutex_);
+  for (auto& driver : drivers_) {""",
+        "T09.2c serialize active callback",
+    ),
+    (
+        """void InputSystem::SetDeviceAssignment(std::unique_ptr<DeviceAssignment> assignment) {
+  assignment_ = std::move(assignment);""",
+        """void InputSystem::SetDeviceAssignment(std::unique_ptr<DeviceAssignment> assignment) {
+  std::scoped_lock lock(state_mutex_);
+  assignment_ = std::move(assignment);""",
+        "T09.2c serialize device assignment",
+    ),
+    (
+        """X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
+                                      X_INPUT_CAPABILITIES* out_caps) {
+  SCOPE_profile_cpu_f("hid");""",
+        """X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
+                                      X_INPUT_CAPABILITIES* out_caps) {
+  std::scoped_lock lock(state_mutex_);
+  SCOPE_profile_cpu_f("hid");""",
+        "T09.2c serialize GetCapabilities",
+    ),
+    (
+        """X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+  SCOPE_profile_cpu_f("hid");""",
+        """X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+  std::scoped_lock lock(state_mutex_);
+  SCOPE_profile_cpu_f("hid");""",
+        "T09.2c serialize GetState",
+    ),
+    (
+        """X_RESULT InputSystem::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
+  SCOPE_profile_cpu_f("hid");""",
+        """X_RESULT InputSystem::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
+  std::scoped_lock lock(state_mutex_);
+  SCOPE_profile_cpu_f("hid");""",
+        "T09.2c serialize SetState",
+    ),
+    (
+        """X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
+                                   X_INPUT_KEYSTROKE* out_keystroke) {
+  SCOPE_profile_cpu_f("hid");""",
+        """X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
+                                   X_INPUT_KEYSTROKE* out_keystroke) {
+  std::scoped_lock lock(state_mutex_);
+  SCOPE_profile_cpu_f("hid");""",
+        "T09.2c serialize GetKeystroke",
+    ),
+]
+
+for old, new, label in _t092c_methods:
+    # AttachWindow in upstream uses the parameter, not window_; keep a
+    # parameter-safe fallback for that exact source spelling.
+    if label == "T09.2c serialize window attach":
+        text = input_system_cpp.read_text(encoding="utf-8")
+        if "std::scoped_lock lock(state_mutex_);" not in text[text.find("void InputSystem::AttachWindow"):text.find("void InputSystem::SetActiveCallback")]:
+            old_actual = """void InputSystem::AttachWindow(rex::ui::Window* window) {
+  window_ = window;"""
+            new_actual = """void InputSystem::AttachWindow(rex::ui::Window* window) {
+  std::scoped_lock lock(state_mutex_);
+  window_ = window;"""
+            patch_once(input_system_cpp, old_actual, new_actual, label)
+        else:
+            print(f"{label}: already applied")
+        continue
+    patch_once(input_system_cpp, old, new, label)
