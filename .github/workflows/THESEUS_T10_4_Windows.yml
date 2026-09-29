@@ -74,6 +74,17 @@ jobs:
             throw "T10.4 ReXApp shutdown bypasses the detach boundary."
           }
 
+          $closingStart = $rexSource.IndexOf("void ReXApp::OnClosing")
+          $terminatePos = $rexSource.IndexOf("runtime_->kernel_state()->TerminateTitle()", $closingStart)
+          $detachPos = $rexSource.IndexOf("OnDetachPresentationPresenter(window_.get())", $closingStart)
+          $hardExitPos = $rexSource.IndexOf("std::_Exit(0)", $closingStart)
+          if ($closingStart -lt 0 -or $detachPos -lt 0 -or $terminatePos -lt 0 -or $hardExitPos -lt 0) {
+            throw "T10.4 hard-exit close path is incomplete."
+          }
+          if (!($detachPos -lt $terminatePos -and $terminatePos -lt $hardExitPos)) {
+            throw "T10.4 presenter detach must happen before TerminateTitle and std::_Exit."
+          }
+
           $cmake = Get-Content "CMakeLists.txt" -Raw
           if ($cmake -match "ASURA_ENABLE_ASAN|fsanitize=address|theseus_heap_probe") {
             throw "T10.4 must remain free of T09.2 ASan/heap-probe build hooks."
