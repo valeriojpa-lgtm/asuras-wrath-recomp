@@ -1047,9 +1047,17 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
 
   SetProcessDPIAware();
 
-  const bool force_show = HasArg(args, "--launcher") ||
-                          (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool force_hide = HasArg(args, "--no_launcher");
+  const bool runtime_child = HasArg(args, "--theseus_runtime_child");
+  const bool hard_exit_test = HasArg(args, "--theseus_hard_exit_test");
+
+  if (runtime_child && hard_exit_test) {
+    theseus::stability::TriggerHardExitSelfTest();
+  }
+
+  const bool force_show = !runtime_child &&
+                          (HasArg(args, "--launcher") ||
+                           (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+  const bool force_hide = runtime_child || HasArg(args, "--no_launcher");
   RemoveCustomLauncherArgs(args);
 
   LauncherState state;
