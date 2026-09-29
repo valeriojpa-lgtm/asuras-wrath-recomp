@@ -274,9 +274,14 @@ void AppendSettingsArgs(std::vector<std::string>& args,
     platform.BootstrapFromProcess();
   }
 
-  add_int("window_width", s.width);
-  add_int("window_height", s.height);
-  add_bool("fullscreen", s.fullscreen);
+  // T10.3 native presentation policy. The compatibility arguments remain
+  // necessary until the SDL window layer is fully replaced, but Theseus owns
+  // the stable host-facing values.
+  platform.presentation().Configure(s.MakePresentationPolicy());
+  const auto& presentation = platform.presentation().state();
+  add_int("window_width", presentation.width);
+  add_int("window_height", presentation.height);
+  add_bool("fullscreen", presentation.fullscreen);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
   // adapter, VSync and shader-compilation choices. The arguments below are a
