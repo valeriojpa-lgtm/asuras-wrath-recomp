@@ -1,5 +1,6 @@
 #include "platform/theseus_crash.h"
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
