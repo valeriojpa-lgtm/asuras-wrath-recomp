@@ -1,0 +1,224 @@
+name: THESEUS T10.2 - Graphics Backend Bridge
+
+on:
+  push:
+    branches:
+      - theseus/t10-2-graphics-backend-bridge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T10.2 graphics-bridge candidate
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved ReXGlue patches plus T09.3 stability fix
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Prove T10.2 graphics backend bridge
+        shell: powershell
+        run: |
+          $header = Get-Content "src/platform/theseus_graphics.h" -Raw
+          $platform = Get-Content "src/platform/theseus_platform.cpp" -Raw
+          $launcher = Get-Content "src/asura_launcher_win.cpp" -Raw
+          $status = Get-Content "out/theseus/THESEUS_STATUS.txt" -Raw
+
+          foreach ($needle in @(
+            "NativeGraphicsPolicy",
+            "GraphicsPolicyState",
+            "GraphicsBackend"
+          )) {
+            if ($header -notmatch $needle) {
+              throw "T10 graphics policy is missing: $needle"
+            }
+          }
+
+          if ($platform -notmatch "Service::kGraphics") {
+            throw "T10 Platform does not mark graphics policy ownership."
+          }
+          if ($launcher -notmatch "platform\.graphics\(\)\.Configure") {
+            throw "T10 launcher bypasses the Theseus graphics policy."
+          }
+          if ($status -notmatch "Milestone: T10.2-graphics-backend-bridge") {
+            throw "T10 audit did not publish the expected milestone."
+          }
+          if ($status -notmatch "Graphics backend compatibility bridge: PASS") {
+            throw "T10.2 audit did not validate the explicit graphics backend bridge."
+          }
+          $app = Get-Content "src/asurawrath_app.h" -Raw
+          $bridge = Get-Content "src/compat/rexglue_graphics_bridge.cpp" -Raw
+          if ($app -notmatch "InstallGraphicsBackend\(config, host\.graphics\(\)\.state\(\)\)") {
+            throw "T10.2 runtime child does not inject the Theseus-selected backend."
+          }
+          if ($bridge -notmatch "LoadGpuPlugin\(\"xenos\", backend\)") {
+            throw "T10.2 bridge is not the explicit rexgpu-xenos loader."
+          }
+
+          $cmake = Get-Content "CMakeLists.txt" -Raw
+          if ($cmake -match "ASURA_ENABLE_ASAN|fsanitize=address|theseus_heap_probe") {
+            throw "T10 must remain free of T09.2 ASan/heap-probe build hooks."
+          }
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T10.2 native release
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Audit built PE
+        shell: cmd
+        run: |
+          python tools\theseus_pe_audit.py "out/build/win-amd64-release/Asura's Wrath.exe" --out out/theseus/THESEUS_PE_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Crash diagnostics self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_crash_test","--no_launcher" -PassThru -Wait
+          Write-Host "Intentional crash exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $session = Join-Path $userData "Logs/StabilitySession.txt"
+          $reports = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.txt" -ErrorAction SilentlyContinue)
+          $dumps = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.dmp" -ErrorAction SilentlyContinue)
+
+          if ($reports.Count -lt 1) { throw "T10 self-test did not create a crash text report." }
+          if ($dumps.Count -lt 1) { throw "T10 self-test did not create a minidump." }
+          if ($dumps[0].Length -lt 4096) { throw "T10 minidump is unexpectedly small." }
+          if (!(Test-Path $session)) { throw "T10 stability breadcrumb log was not created." }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Hard-exit guard self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_hard_exit_test","--no_launcher" -PassThru -Wait
+          Write-Host "Guard parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $hardReports = @(Get-ChildItem $crashDir -Filter "TheseusHardExit_*.txt" -ErrorAction SilentlyContinue)
+          if ($hardReports.Count -lt 1) { throw "T10 guard did not create a hard-exit report." }
+
+          $hardText = Get-Content $hardReports[0].FullName -Raw
+          if ($hardText -notmatch "THESEUS_HARD_EXIT_SELF_TEST") {
+            throw "T10 hard-exit report did not preserve the self-test classification."
+          }
+          if ($hardText -notmatch "Milestone: T10.2-graphics-backend-bridge") {
+            throw "T10.2 hard-exit report still carries a stale milestone label."
+          }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Package portable T10 graphics boundary
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item (Join-Path $build "Asura's Wrath.exe") $dist
+          Get-ChildItem $build -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T10.2 GRAPHICS BACKEND BRIDGE",
+            "==================================================",
+            "",
+            "T10.2 explicit graphics-backend bridge candidate.",
+            "",
+            "Base: validated/frozen T09.3 native stability baseline.",
+            "Theseus owns graphics policy and now explicitly injects the selected renderer backend.",
+            "The validated rexgpu-xenos D3D12/Vulkan renderer remains the compatibility backend behind an explicit bridge.",
+            "",
+            "No Xenos command processor, shader translator or presenter replacement is claimed yet.",
+            "",
+            "Place this folder next to your existing Data folder and launch Asura's Wrath.exe normally.",
+            "",
+            "Validation:",
+            "  1. Test D3D12 with the known-good settings.",
+            "  2. Confirm menu + gameplay + Alt-Tab + clean exit.",
+            "  3. Optionally test Vulkan separately; do not overwrite the frozen T09.3 baseline.",
+            "",
+            "Preserve UserData\Logs if any unexpected exit occurs."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          Get-Content "out/theseus/THESEUS_PE_STATUS.txt"
+
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE"
+          $forbidden = @(Get-ChildItem $dist -Recurse -File | Where-Object {
+            $_.Name -match "asan|llvm-symbolizer|heap_probe"
+          })
+          if ($forbidden.Count -gt 0) {
+            throw "T10 package contains forbidden diagnostic files: $($forbidden.Name -join ', ')"
+          }
+
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE_PORTABLE.zip"
+          Write-Host "Portable package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T10 graphics boundary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T10_2_GRAPHICS_BRIDGE_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
