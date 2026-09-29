@@ -85,6 +85,7 @@ endif()
 list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_platform.cpp
   src/platform/theseus_config.cpp
+  src/platform/theseus_display.cpp
   src/platform/theseus_filesystem.cpp
   src/platform/theseus_saves.cpp
   src/platform/theseus_input.cpp
