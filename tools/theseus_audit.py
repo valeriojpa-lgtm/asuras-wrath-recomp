@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T09.3 Theseus dependency audit.
+"""T10 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -242,10 +242,29 @@ def main() -> int:
         "PASS" if not missing_input_serialization_markers else "FAIL"
     )
 
+    graphics_policy_header = read_text(
+        repo / "src" / "platform" / "theseus_graphics.h"
+    )
+    config_header = read_text(repo / "src" / "platform" / "theseus_config.h")
+    platform_source = read_text(repo / "src" / "platform" / "theseus_platform.cpp")
+    cmake_source = read_text(repo / "CMakeLists.txt")
+    graphics_policy_boundary = (
+        "PASS"
+        if "class NativeGraphicsPolicy" in graphics_policy_header
+        and "struct GraphicsPolicyState" in graphics_policy_header
+        and "enum class GraphicsBackend" in graphics_policy_header
+        and "MakeGraphicsPolicy" in config_header
+        and "platform.graphics().Configure" in launcher_source
+        and "T10 native graphics policy" in launcher_source
+        and "Service::kGraphics" in platform_source
+        and "src/platform/theseus_graphics.cpp" in cmake_source
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T09.3-native-input-serialization",
+        "Milestone: T10-native-graphics-boundary",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -265,13 +284,14 @@ def main() -> int:
         f"Native audio policy boundary: {audio_policy_boundary}",
         f"Audio compatibility bridge: {audio_bridge_boundary}",
         "",
-        "Native host facilities (T09):",
+        "Native host facilities (T10):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
         "  saves/profile  : native",
         "  input policy   : native",
         "  audio policy   : native",
+        "  graphics policy : native",
         "  timing         : native",
         "  threading sync : native",
         "  crash telemetry : native",
@@ -286,7 +306,7 @@ def main() -> int:
         "  audio      : native policy / rexglue XMA + SDL bridge",
         "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
         "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
-        "  graphics   : rexglue",
+        "  graphics   : native policy / rexgpu-xenos renderer compatibility backend",
         "",
         "Host files with direct ReXGlue references:",
     ]
@@ -299,9 +319,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T09.3 invariant:",
-        "  Native release build: no AddressSanitizer, heap probe, or diagnostic runtime dependency.",
-        "  The only T09.2 behavior carried forward is serialized InputSystem state access.",
+        "T10 invariant:",
+        "  T09.3 remains the immutable validated stability baseline.",
+        "  Theseus owns graphics policy: backend, adapter, VSync and async shader selection.",
+        "  rexgpu-xenos remains the temporary validated D3D12/Vulkan renderer backend.",
+        "  No Xenos translation, command processor, shader or presentation behavior is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
         "  In-process unhandled failures still produce text reports plus minidumps.",
         "  The launcher survives as an external guard while the game runs in a normal child process.",
@@ -381,6 +403,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 11
+    if graphics_policy_boundary != "PASS":
+        print(
+            "ERROR: T10 native graphics policy boundary is incomplete.",
+            file=sys.stderr,
+        )
+        return 12
     return 0
 
 
