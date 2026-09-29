@@ -148,6 +148,11 @@ Platform::Platform() {
   // T08: host sleep/yield/TLS/waits/events/semaphores/mutexes/timers are
   // project-owned. Guest XThread/APC/DPC semantics remain compatibility ABI.
   backends_[static_cast<std::size_t>(Service::kThreading)] = Backend::kNative;
+
+  // T10: graphics policy/configuration is Theseus-owned. The validated
+  // rexgpu-xenos D3D12/Vulkan plugin remains the temporary renderer backend
+  // while the graphics boundary is migrated incrementally.
+  backends_[static_cast<std::size_t>(Service::kGraphics)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
