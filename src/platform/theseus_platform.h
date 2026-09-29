@@ -6,13 +6,14 @@
 #include <optional>
 #include <string_view>
 
+#include "platform/theseus_audio.h"
 #include "platform/theseus_filesystem.h"
 #include "platform/theseus_input.h"
 #include "platform/theseus_saves.h"
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T05-native-input";
+inline constexpr std::string_view kMilestone = "T06-native-audio-policy";
 
 enum class Backend {
   kReXGlue,
@@ -68,6 +69,8 @@ class Platform final {
   [[nodiscard]] const NativeSaveSystem& saves() const noexcept { return saves_; }
   [[nodiscard]] NativeInputPolicy& input() noexcept { return input_; }
   [[nodiscard]] const NativeInputPolicy& input() const noexcept { return input_; }
+  [[nodiscard]] NativeAudioPolicy& audio() noexcept { return audio_; }
+  [[nodiscard]] const NativeAudioPolicy& audio() const noexcept { return audio_; }
   [[nodiscard]] Backend backend(Service service) const noexcept;
 
  private:
@@ -77,6 +80,7 @@ class Platform final {
   NativeFileSystem files_{};
   NativeSaveSystem saves_{};
   NativeInputPolicy input_{};
+  NativeAudioPolicy audio_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
   bool initialized_ = false;
 };
