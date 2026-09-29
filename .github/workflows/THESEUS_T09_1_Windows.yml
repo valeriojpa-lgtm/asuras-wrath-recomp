@@ -1,0 +1,191 @@
+name: THESEUS T09.1 - Hard Exit Guard
+
+on:
+  push:
+    branches:
+      - theseus/t09-1-hard-exit-guard
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T09.1
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved ReXGlue startup/VFS patches
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T09.1
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Audit built PE
+        shell: cmd
+        run: |
+          python tools\theseus_pe_audit.py "out/build/win-amd64-release/Asura's Wrath.exe" --out out/theseus/THESEUS_PE_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Crash diagnostics self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_crash_test","--no_launcher" -PassThru -Wait
+          Write-Host "Intentional crash exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $session = Join-Path $userData "Logs/StabilitySession.txt"
+          $reports = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.txt" -ErrorAction SilentlyContinue)
+          $dumps = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.dmp" -ErrorAction SilentlyContinue)
+
+          if ($reports.Count -lt 1) { throw "T09 self-test did not create a crash text report." }
+          if ($dumps.Count -lt 1) { throw "T09 self-test did not create a minidump." }
+          if ($reports[0].Length -lt 256) { throw "T09 crash report is unexpectedly small." }
+          if ($dumps[0].Length -lt 4096) { throw "T09 minidump is unexpectedly small." }
+          if (!(Test-Path $session)) { throw "T09 stability breadcrumb log was not created." }
+
+          $reportText = Get-Content $reports[0].FullName -Raw
+          if ($reportText -notmatch "THESEUS_CRASH_SELF_TEST") {
+            throw "T09 crash report did not record the self-test exception."
+          }
+
+          $sessionText = Get-Content $session -Raw
+          if ($sessionText -notmatch "PE audit:") {
+            throw "T09 session log did not record the PE audit."
+          }
+
+          Write-Host "Crash report: $($reports[0].FullName) ($($reports[0].Length) bytes)"
+          Write-Host "Minidump: $($dumps[0].FullName) ($($dumps[0].Length) bytes)"
+          Remove-Item -Recurse -Force $userData
+
+      - name: Hard-exit guard self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_hard_exit_test","--no_launcher" -PassThru -Wait
+          Write-Host "Guard parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $hardReports = @(Get-ChildItem $crashDir -Filter "TheseusHardExit_*.txt" -ErrorAction SilentlyContinue)
+          if ($hardReports.Count -lt 1) {
+            throw "T09.1 guard did not create a hard-exit report."
+          }
+          if ($hardReports[0].Length -lt 256) {
+            throw "T09.1 hard-exit report is unexpectedly small."
+          }
+
+          $hardText = Get-Content $hardReports[0].FullName -Raw
+          if ($hardText -notmatch "THESEUS_HARD_EXIT_SELF_TEST") {
+            throw "T09.1 hard-exit report did not preserve the child exit code classification."
+          }
+          if ($hardText -notmatch "CleanRuntimeShutdownBreadcrumb: no") {
+            throw "T09.1 hard-exit report incorrectly marked forced termination as clean."
+          }
+
+          Write-Host "Hard-exit report: $($hardReports[0].FullName) ($($hardReports[0].Length) bytes)"
+          Get-Content $hardReports[0].FullName
+          Remove-Item -Recurse -Force $userData
+
+      - name: Package portable T09.1
+        shell: powershell
+        run: |
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T09_1"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item "out/build/win-amd64-release/Asura's Wrath.exe" $dist
+          Get-ChildItem "out/build/win-amd64-release" -Filter *.dll -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T09.1",
+            "===========================",
+            "",
+            "Hard Exit Guard validation build.",
+            "",
+            "Place the THESEUS_T09_1 folder next to your existing Data folder:",
+            "  Asura's Wrath\Data",
+            "  Asura's Wrath\THESEUS_T09_1",
+            "",
+            "IMPORTANT TEST:",
+            "  Launch Asura's Wrath.exe directly.",
+            "  Do NOT pass --game_data_root and do NOT use a helper CMD.",
+            "",
+            "Expected result:",
+            "  The launcher remains as a hidden guard while the game runs in a normal child process.",
+            "  Standard unhandled crashes still create TheseusCrash .txt + .dmp files.",
+            "  Hard exits that bypass SEH create TheseusHardExit .txt with the exact child exit code.",
+            "  Launcher settings remain in UserData\Config\Asura.ini.",
+            "",
+            "No installation is required."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T09_1_1_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          Get-Content "out/theseus/THESEUS_PE_STATUS.txt"
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T09_1_1_PORTABLE.zip"
+          Write-Host "Portable package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T09.1
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T09_1_1_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T09_1_1_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
