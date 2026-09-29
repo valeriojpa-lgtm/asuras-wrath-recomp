@@ -132,6 +132,10 @@ Platform::Platform() {
   // T04: host save/profile policy is Theseus-owned. Guest XAM calls remain a
   // compatibility bridge while the recompiled game still speaks the Xbox ABI.
   backends_[static_cast<std::size_t>(Service::kSaves)] = Backend::kNative;
+
+  // T05: input policy/configuration belongs to Theseus. Physical SDL/XInput
+  // drivers and the guest XAM ABI remain temporary compatibility bridges.
+  backends_[static_cast<std::size_t>(Service::kInput)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
