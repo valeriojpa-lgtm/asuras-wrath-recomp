@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "platform/theseus_audio.h"
+#include "platform/theseus_display.h"
 #include "platform/theseus_filesystem.h"
 #include "platform/theseus_graphics.h"
 #include "platform/theseus_input.h"
@@ -17,7 +18,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T10.4-presentation-lifecycle";
+inline constexpr std::string_view kMilestone = "T11-native-display-modes";
 
 enum class Backend {
   kReXGlue,
@@ -34,6 +35,7 @@ enum class Service : std::size_t {
   kThreading,
   kGraphics,
   kPresentation,
+  kDisplay,
   kCount,
 };
 
@@ -80,6 +82,8 @@ class Platform final {
   [[nodiscard]] const NativeGraphicsPolicy& graphics() const noexcept { return graphics_; }
   [[nodiscard]] NativePresentationPolicy& presentation() noexcept { return presentation_; }
   [[nodiscard]] const NativePresentationPolicy& presentation() const noexcept { return presentation_; }
+  [[nodiscard]] NativeDisplayService& display() noexcept { return display_; }
+  [[nodiscard]] const NativeDisplayService& display() const noexcept { return display_; }
   [[nodiscard]] NativeTimingPolicy& timing() noexcept { return timing_; }
   [[nodiscard]] const NativeTimingPolicy& timing() const noexcept { return timing_; }
   [[nodiscard]] NativeThreadingService& threading() noexcept { return threading_; }
@@ -96,6 +100,7 @@ class Platform final {
   NativeAudioPolicy audio_{};
   NativeGraphicsPolicy graphics_{};
   NativePresentationPolicy presentation_{};
+  NativeDisplayService display_{};
   NativeTimingPolicy timing_{};
   NativeThreadingService threading_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
