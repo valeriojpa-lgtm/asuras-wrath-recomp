@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include "platform/theseus_audio.h"
+#include "platform/theseus_graphics.h"
 #include "platform/theseus_input.h"
 
 namespace theseus {
@@ -18,6 +19,16 @@ struct Config {
   int adapter = -1;
   bool vsync = false;
   bool async_shaders = false;
+
+  [[nodiscard]] GraphicsPolicyState MakeGraphicsPolicy() const {
+    GraphicsPolicyState policy;
+    policy.backend = renderer == 1 ? GraphicsBackend::kVulkan
+                                   : GraphicsBackend::kD3D12;
+    policy.adapter = adapter;
+    policy.vsync = vsync;
+    policy.async_shaders = async_shaders;
+    return policy;
+  }
 
   bool mnk = true;
   int input_backend = 0;  // 0 = SDL, 1 = XInput.
