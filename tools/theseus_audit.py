@@ -294,6 +294,8 @@ def main() -> int:
         "T10.3 presentation hooks",
         "T10.3 delegate host window creation",
         "T10.3 delegate presenter attachment",
+        "T10.4 presentation detach hook",
+        "T10.4 delegate presenter detach",
     )
     missing_presentation_patch_markers = [
         marker for marker in presentation_patch_markers if marker not in patch_script
@@ -307,11 +309,14 @@ def main() -> int:
         and "Service::kPresentation" in platform_source
         and "CreatePresentationWindow" in presentation_bridge_header
         and "AttachPresentationPresenter" in presentation_bridge_header
+        and "DetachPresentationPresenter" in presentation_bridge_header
         and "rex::ui::Window::Create" in presentation_bridge_source
         and "window.SetPresenter(presenter)" in presentation_bridge_source
+        and "window.SetPresenter(nullptr)" in presentation_bridge_source
         and "host.presentation().Configure(native_config.MakePresentationPolicy())" in app_header
         and "OnCreatePresentationWindow" in app_header
         and "OnAttachPresentationPresenter" in app_header
+        and "OnDetachPresentationPresenter" in app_header
         and "src/platform/theseus_presentation.cpp" in cmake_source
         and "src/compat/rexglue_presentation_bridge.cpp" in cmake_source
         and not missing_presentation_patch_markers
@@ -321,7 +326,7 @@ def main() -> int:
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T10.3-native-presentation-boundary",
+        "Milestone: T10.4-presentation-lifecycle",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -343,7 +348,7 @@ def main() -> int:
         f"Graphics backend compatibility bridge: {graphics_backend_bridge}",
         f"Native presentation boundary: {presentation_boundary}",
         "",
-        "Native host facilities (T10.3):",
+        "Native host facilities (T10.4):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -367,7 +372,7 @@ def main() -> int:
         "  timing     : native clock / rexglue Xbox timing-export ABI bridge",
         "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
         "  graphics   : native policy + backend injection / rexgpu-xenos compatibility renderer",
-        "  presentation : Theseus create+attach boundary / rexglue SDL Window + backend Presenter",
+        "  presentation : Theseus create+attach+detach lifecycle / rexglue SDL Window + backend Presenter",
         "",
         "Host files with direct ReXGlue references:",
     ]
@@ -380,11 +385,11 @@ def main() -> int:
 
     lines += [
         "",
-        "T10.3 invariant:",
-        "  T10.2 remains the validated graphics-backend baseline.",
+        "T10.4 invariant:",
+        "  T10.3 remains the validated host presentation baseline.",
         "  Theseus owns stable host presentation policy from Asura.ini.",
         "  Asura overrides ReXApp host-window creation through the explicit presentation bridge.",
-        "  Asura overrides presenter attachment through the same explicit boundary.",
+        "  Asura routes presenter attach and detach through the same lifecycle boundary.",
         "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
         "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
@@ -480,7 +485,7 @@ def main() -> int:
         return 13
     if presentation_boundary != "PASS":
         print(
-            "ERROR: T10.3 native presentation boundary is incomplete.",
+            "ERROR: T10.4 presentation lifecycle boundary is incomplete.",
             file=sys.stderr,
         )
         return 14
