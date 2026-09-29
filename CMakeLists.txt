@@ -145,8 +145,10 @@ if(ASURA_ENABLE_ASAN)
   # on the host; ordinary ASan stack/heap instrumentation remains enabled.
   target_compile_definitions(asura_wrath_recomp PRIVATE
     ASURA_HEAP_PROBE=1
-    _DISABLE_STRING_ANNOTATION
-    _DISABLE_VECTOR_ANNOTATION
+    # Guest/ReXGlue TUs are intentionally unsanitized in T09.2b and therefore
+    # emit annotate_string/vector/optional=0. Keep the host's STL annotations
+    # aligned while retaining normal ASan instrumentation in host code.
+    _DISABLE_STL_ANNOTATION
   )
 endif()
 
