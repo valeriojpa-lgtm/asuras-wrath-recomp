@@ -140,6 +140,10 @@ Platform::Platform() {
   // T06: audio policy/configuration belongs to Theseus. XMA decode, the guest
   // XAudio/XMA ABI and SDL sample submission remain temporary bridges.
   backends_[static_cast<std::size_t>(Service::kAudio)] = Backend::kNative;
+
+  // T07: host/guest clock policy and conversion are project-owned. The Xbox
+  // kernel timing exports remain a temporary ABI bridge inside rexruntime.
+  backends_[static_cast<std::size_t>(Service::kTiming)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
