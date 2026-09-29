@@ -442,3 +442,63 @@ T09 exposes a hidden developer-only crash trigger used by GitHub Actions.
 The workflow intentionally crashes the built executable and fails unless both a
 text report and a non-empty minidump are created. This validates the crash path
 end to end rather than merely compiling `MiniDumpWriteDump`.
+
+
+## T10: Native Graphics Boundary
+
+T10 begins the graphics migration without destabilizing the validated T09.3
+runtime. It deliberately separates **stable PC-facing graphics policy** from
+the still-temporary Xbox/Xenos renderer implementation.
+
+```
+Asura / UE3 guest rendering
+        |
+Xbox 360 Xenos command stream
+        |
+rexgpu-xenos                 [temporary compatibility renderer]
+  |-- D3D12
+  `-- Vulkan
+        |
+Theseus NativeGraphicsPolicy [native/project-owned policy]
+        |
+Asura.ini + native launcher
+```
+
+Theseus owns in T10:
+- renderer preference (D3D12 / Vulkan);
+- host adapter preference;
+- VSync policy;
+- asynchronous shader-compilation policy;
+- the stable PC-facing graphics configuration contract.
+
+The current `rexgpu-xenos` plugin temporarily owns:
+- Xenos command processor and register semantics;
+- guest shader translation;
+- texture/render-target conversion and caches;
+- D3D12/Vulkan graphics providers;
+- swapchain/presenter implementation;
+- guest frontbuffer presentation.
+
+This is intentional. ReXGlue already exposes an abstract `IGraphicsSystem`
+and a versioned GPU plugin ABI, so T10 can put a Theseus-owned boundary in
+front of the validated renderer before replacing deeper pieces.
+
+### T10 migration rule
+
+T09.3 remains immutable. Every deeper graphics change must be developed on a
+T10+ branch and remain A/B-testable against the validated `rexgpu-xenos`
+path. No command processor, shader translator, presentation path or Xenos
+semantic is removed merely to reduce ReXGlue line count.
+
+The target direction is:
+
+```
+T10  policy ownership / explicit compatibility boundary
+  -> host presentation ownership
+  -> display + resolution ownership
+  -> shader/pipeline/cache ownership
+  -> progressively thinner Xenos compatibility layer
+```
+
+The long-term goal is maximum practical native-PC independence while preserving
+game correctness and stability over architectural purity.
