@@ -1,0 +1,233 @@
+name: THESEUS T11 - Native Display Modes
+
+on:
+  push:
+    branches:
+      - theseus/t11-native-display-modes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T11 native-display candidate
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved ReXGlue patches plus T09.3 stability fix
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Prove T11 native display modes
+        shell: powershell
+        run: |
+          $status = Get-Content "out/theseus/THESEUS_STATUS.txt" -Raw
+          $header = Get-Content "src/platform/theseus_display.h" -Raw
+          $source = Get-Content "src/platform/theseus_display.cpp" -Raw
+          $launcher = Get-Content "src/asura_launcher_win.cpp" -Raw
+          $config = Get-Content "src/platform/theseus_config.cpp" -Raw
+          $platform = Get-Content "src/platform/theseus_platform.cpp" -Raw
+
+          if ($status -notmatch "Milestone: T11-native-display-modes") {
+            throw "T11 audit did not publish the expected milestone."
+          }
+          if ($status -notmatch "Native display-mode discovery: PASS") {
+            throw "T11 audit did not validate native display discovery."
+          }
+          foreach ($needle in @(
+            "NativeDisplayService",
+            "DisplayMonitor",
+            "DisplayMode"
+          )) {
+            if ($header -notmatch $needle) {
+              throw "T11 display service is missing: $needle"
+            }
+          }
+          if ($source -notmatch "EnumDisplayDevicesW" -or
+              $source -notmatch "EnumDisplaySettingsW") {
+            throw "T11 is not enumerating display devices and modes through Win32."
+          }
+          if ($launcher -match "constexpr ResolutionOption kResolutions") {
+            throw "T11 launcher still uses the old fixed resolution table."
+          }
+          if ($launcher -notmatch "RebuildResolutionOptions" -or
+              $launcher -notmatch 'platform\.display\(\)\.Enumerate\(\)') {
+            throw "T11 launcher does not rebuild resolution choices from native display data."
+          }
+          if ($launcher -notmatch "1920, 1200" -or
+              $launcher -notmatch "2560, 1600" -or
+              $launcher -notmatch "3440, 1440") {
+            throw "T11 fallback set lost one of the strong validation modes."
+          }
+          if ($config -notmatch 'Monitor=' -or
+              $platform -notmatch "Service::kDisplay") {
+            throw "T11 monitor selection is not project-owned/persisted."
+          }
+
+          $cmake = Get-Content "CMakeLists.txt" -Raw
+          if ($cmake -match "ASURA_ENABLE_ASAN|fsanitize=address|theseus_heap_probe") {
+            throw "T11 must remain free of T09.2 ASan/heap-probe build hooks."
+          }
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T11 native release
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Audit built PE
+        shell: cmd
+        run: |
+          python tools\theseus_pe_audit.py "out/build/win-amd64-release/Asura's Wrath.exe" --out out/theseus/THESEUS_PE_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Crash diagnostics self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_crash_test","--no_launcher" -PassThru -Wait
+          Write-Host "Intentional crash exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $session = Join-Path $userData "Logs/StabilitySession.txt"
+          $reports = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.txt" -ErrorAction SilentlyContinue)
+          $dumps = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.dmp" -ErrorAction SilentlyContinue)
+
+          if ($reports.Count -lt 1) { throw "T11 self-test did not create a crash text report." }
+          if ($dumps.Count -lt 1) { throw "T11 self-test did not create a minidump." }
+          if ($dumps[0].Length -lt 4096) { throw "T10 minidump is unexpectedly small." }
+          if (!(Test-Path $session)) { throw "T11 stability breadcrumb log was not created." }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Hard-exit guard self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_hard_exit_test","--no_launcher" -PassThru -Wait
+          Write-Host "Guard parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $hardReports = @(Get-ChildItem $crashDir -Filter "TheseusHardExit_*.txt" -ErrorAction SilentlyContinue)
+          if ($hardReports.Count -lt 1) { throw "T11 guard did not create a hard-exit report." }
+
+          $hardText = Get-Content $hardReports[0].FullName -Raw
+          if ($hardText -notmatch "THESEUS_HARD_EXIT_SELF_TEST") {
+            throw "T10 hard-exit report did not preserve the self-test classification."
+          }
+          if ($hardText -notmatch "Milestone: T11-native-display-modes") {
+            throw "T11 hard-exit report still carries a stale milestone label."
+          }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Package portable T11 native display modes
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item (Join-Path $build "Asura's Wrath.exe") $dist
+          Get-ChildItem $build -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T11 NATIVE DISPLAY MODES",
+            "==================================================",
+            "",
+            "T11 native display-mode candidate.",
+            "",
+            "Base: validated/frozen T10.4 presentation lifecycle.",
+            "Theseus owns graphics policy, presentation lifecycle, monitor discovery and display-mode discovery.",
+            "The launcher now builds monitor and resolution choices from native Win32 display enumeration.",
+            "",
+            "SDL Window/monitor application, D3D12/Vulkan Presenter, swapchain, Xenos command processor and shader translator remain compatibility-backed.",
+            "",
+            "Place this folder next to your existing Data folder and launch Asura's Wrath.exe normally.",
+            "",
+            "Validation:",
+            "  1. Confirm the launcher shows the detected monitor(s).",
+            "  2. Confirm the resolution list reflects the selected monitor.",
+            "  3. Test 1920x1200 and 2560x1600 where the monitor exposes them.",
+            "  4. Confirm menu + gameplay + repeated Alt-Tab + clean exit.",
+            "  5. Keep the frozen T10.4 baseline untouched.",
+            "",
+            "Preserve UserData\Logs if any unexpected exit occurs."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          Get-Content "out/theseus/THESEUS_PE_STATUS.txt"
+
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES"
+          $forbidden = @(Get-ChildItem $dist -Recurse -File | Where-Object {
+            $_.Name -match "asan|llvm-symbolizer|heap_probe"
+          })
+          if ($forbidden.Count -gt 0) {
+            throw "T11 package contains forbidden diagnostic files: $($forbidden.Name -join ', ')"
+          }
+
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES_PORTABLE.zip"
+          Write-Host "Portable package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T11 native display modes
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T11_NATIVE_DISPLAY_MODES_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
