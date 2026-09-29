@@ -502,3 +502,38 @@ T10  policy ownership / explicit compatibility boundary
 
 The long-term goal is maximum practical native-PC independence while preserving
 game correctness and stability over architectural purity.
+
+
+## T10.2: Explicit Graphics Backend Bridge
+
+T10 RUN 01 proved that graphics policy can move to Theseus without changing
+runtime behavior. T10.2 removes the next hidden ownership point: on the normal
+portable Windows path, ReXApp no longer decides which concrete GPU backend to
+instantiate.
+
+The runtime child now:
+1. bootstraps Theseus;
+2. reads the stable `UserData/Config/Asura.ini`;
+3. reconstructs `NativeGraphicsPolicy`;
+4. asks the explicit `rexglue_graphics_bridge` to instantiate the validated
+   `rexgpu-xenos` D3D12 or Vulkan backend;
+5. injects that instance into `RuntimeConfig.graphics`.
+
+```
+Asura launcher / Asura.ini
+        |
+Theseus NativeGraphicsPolicy
+        |
+rexglue_graphics_bridge      [explicit temporary adapter]
+        |
+rexgpu-xenos                 [validated compatibility renderer]
+        |
+D3D12 / Vulkan
+```
+
+The legacy ReXApp plugin-loading path is retained only as a safety fallback.
+Presentation, Xenos command processing, shader translation and guest graphics
+semantics remain unchanged in T10.2.
+
+This is deliberately reversible: T10 RUN 01 remains the known-good baseline,
+and the bridge can be bypassed without touching the guest code.
