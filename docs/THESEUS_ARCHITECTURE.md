@@ -372,3 +372,73 @@ Still temporary compatibility code:
 The sync core under `src/compat/theseus_sync_bridge.*` contains no ReXGlue
 dependency and is temporarily compiled into rexcore while the compatibility
 wrappers remain.
+
+
+## T09 executable stability and crash telemetry
+
+T09 deliberately pauses further guest-kernel migration to make the Windows
+executable diagnosable and less disruptive during long RUNs.
+
+### PE audit
+
+The Windows build is required to remain:
+- AMD64 / PE32+;
+- Large Address Aware;
+- ASLR-enabled;
+- NX-compatible;
+- High-Entropy-VA enabled.
+
+T09 also changes the executable subsystem from console to **Windows GUI**.
+The app already has a native `wWinMain`, so no console window is required
+behind the launcher.
+
+The classic 32-bit LAA workaround is therefore not a missing fix here: the
+64-bit executable already carries the LAA characteristic. T09 keeps auditing it
+so future linker changes cannot silently regress the flag.
+
+### Crash black box
+
+A project-owned process-wide crash handler is installed before the native
+launcher and reasserted before runtime setup.
+
+On an unhandled failure it writes:
+
+```
+UserData/Logs/
+├─ StabilitySession.txt
+└─ Crashes/
+   ├─ TheseusCrash_<timestamp>_pid..._tid....txt
+   └─ TheseusCrash_<timestamp>_pid..._tid....dmp
+```
+
+The text report records:
+- exception code and address;
+- module containing the faulting address;
+- process/thread IDs;
+- working set and private memory usage;
+- available physical memory;
+- loaded modules;
+- the associated session breadcrumb log.
+
+The minidump contains thread information, loaded/unloaded module information,
+handles and indirectly referenced memory without taking a full-memory dump.
+
+### Breadcrumbs
+
+The session log records important transitions such as:
+- launcher entry and selected graphics settings;
+- runtime pre/post setup;
+- guest main-thread creation and exit;
+- focus loss/gain;
+- minimize/restore;
+- shutdown.
+
+This is intentionally lightweight and portable. It does not upload anything and
+does not require an installer, debugger, Visual Studio or external crash tool.
+
+### CI self-test
+
+T09 exposes a hidden developer-only crash trigger used by GitHub Actions.
+The workflow intentionally crashes the built executable and fails unless both a
+text report and a non-empty minidump are created. This validates the crash path
+end to end rather than merely compiling `MiniDumpWriteDump`.
