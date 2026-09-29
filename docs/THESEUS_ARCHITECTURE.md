@@ -1,6 +1,6 @@
 # Asura's Wrath — Theseus PC Port
 
-## T05: Native Input Policy
+## T06: Native Audio Policy
 
 T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
 portable path discovery and launcher configuration into that boundary. T03
@@ -252,3 +252,49 @@ Alt-Tab stack is solved yet.
 
 Mouse-driven menu selection is explicitly out of scope for T05 and reserved for
 late-stage PC polish.
+
+
+## T06 audio boundary
+
+The original T06 target was "native video". The audit found that Asura's
+cinematics are Bink (.bik) assets and ReXGlue does not contain a standalone
+Bink decoder. Movie decoding therefore remains inside the recompiled game/UE3
+path and ultimately reaches the Xenos graphics pipeline. Replacing it honestly
+would require a later Bink-to-host-decoder integration and belongs with deeper
+media/graphics work.
+
+T06 therefore moves the next real host-owned boundary: audio policy.
+
+```
+Asura / UE3
+   |
+XAudio* + XMA*             [temporary Xbox ABI]
+   |
+ReXGlue XMA decoder        [temporary FFmpeg bridge]
+   |
+ReXGlue SDL audio driver   [temporary sample-output bridge]
+   |
+Theseus NativeAudioPolicy  [native policy/configuration]
+   |
+Asura.ini + Launcher
+```
+
+Theseus owns:
+- mute policy;
+- queued-frame / latency policy;
+- the stable PC-facing audio configuration;
+- the host-facing application identity.
+
+ReXGlue temporarily owns:
+- XMA context emulation and decoding;
+- Xbox XAudio/XMA ABI calls;
+- SDL audio-device stream submission.
+
+The SDL audio metadata is patched to identify the application as
+`Asura's Wrath` instead of `rexglue`.
+
+The launcher exposes a minimal AUDIO section:
+- Mute
+- Buffer / latency: 4, 8, 16 or 32 queued frames
+
+Values are stored in `UserData/Config/Asura.ini` under `[Audio]`.
