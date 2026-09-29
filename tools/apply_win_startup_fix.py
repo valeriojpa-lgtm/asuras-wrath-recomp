@@ -1104,11 +1104,11 @@ bool SetTlsValue(TlsHandle handle, uintptr_t value) {
 }"""
 
 new_t08_basic_ops = """void MaybeYield() {
-  theseus::sync::Yield();
+  theseus::sync::YieldHostThread();
 }
 
 void SyncMemory() {
-  theseus::sync::MemoryBarrier();
+  theseus::sync::FullMemoryFence();
 }
 
 void Sleep(std::chrono::microseconds duration) {
