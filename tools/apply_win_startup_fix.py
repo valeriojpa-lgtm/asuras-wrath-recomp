@@ -767,7 +767,8 @@ new_t07_clock_include = """#include <rex/chrono/clock.h>
 #include <rex/cvar.h>
 #include <rex/math.h>
 
-#include "compat/theseus_timing_bridge.h""""
+#include "compat/theseus_timing_bridge.h"
+"""
 
 patch_once(clock_cpp, old_t07_clock_include, new_t07_clock_include,
            "T07 timing bridge include")
@@ -992,7 +993,8 @@ old_t07_clock_win_include = """#include <rex/chrono/clock.h>
 new_t07_clock_win_include = """#include <rex/chrono/clock.h>
 #include <rex/platform.h>
 
-#include "compat/theseus_timing_bridge.h""""
+#include "compat/theseus_timing_bridge.h"
+"""
 
 patch_once(clock_win_cpp, old_t07_clock_win_include, new_t07_clock_win_include,
            "T07 Windows host clock bridge include")
