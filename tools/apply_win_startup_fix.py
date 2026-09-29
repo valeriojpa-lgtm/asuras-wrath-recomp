@@ -738,3 +738,18 @@ void MnkInputDriver::OnGotFocus(rex::ui::UISetupEvent&) {
 
 patch_once(mnk_cpp, old_t05_lost_focus, new_t05_lost_focus,
            "T05 restore cursor on focus loss")
+
+
+# 9) Theseus T06 audio-policy bridge. Audio policy/configuration is owned by
+# Theseus; XMA decode and SDL sample output remain compatibility bridges.
+sdl_audio_cpp = Path("tools/rexglue/src/audio/sdl/sdl_audio_driver.cpp")
+
+old_t06_audio_metadata = """  // Set app name for audio device identification
+  SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "rexglue");"""
+
+new_t06_audio_metadata = """  // T06: expose the actual game identity to the host audio stack rather than
+  // leaking the compatibility runtime name into mixers/device diagnostics.
+  SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "Asura's Wrath");"""
+
+patch_once(sdl_audio_cpp, old_t06_audio_metadata, new_t06_audio_metadata,
+           "T06 host audio app identity")
