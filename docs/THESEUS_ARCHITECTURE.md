@@ -1,6 +1,6 @@
 # Asura's Wrath — Theseus PC Port
 
-## T04: Native Saves + Profile
+## T05: Native Input Policy
 
 T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
 portable path discovery and launcher configuration into that boundary. T03
@@ -199,3 +199,56 @@ runtime starts. The launcher passes that native decision through a temporary
 Only a two-button XAM message with the first button focused is eligible for
 automatic confirmation, and the explicit first-run condition is one-shot.
 Normal message boxes remain untouched.
+
+
+## T05 input boundary
+
+T05 separates **input policy** from **physical device drivers** and from the
+guest Xbox input ABI.
+
+```
+Asura guest logic
+      |
+   XamInput*                 [temporary Xbox ABI]
+      |
+ReXGlue SDL/XInput/MnK      [temporary physical-driver bridge]
+      |
+Theseus NativeInputPolicy   [native policy/configuration]
+      |
+Asura.ini + Launcher
+```
+
+Theseus owns:
+- controller backend preference (SDL / XInput);
+- keyboard/mouse enablement;
+- mouse-look enablement and sensitivity;
+- cursor visibility policy;
+- keyboard bindings;
+- the stable PC-facing configuration format.
+
+ReXGlue temporarily owns:
+- SDL controller polling;
+- Windows XInput polling/vibration;
+- keyboard/mouse event translation into Xbox controller state;
+- the `XamInput*` guest ABI.
+
+The launcher exposes a **Controls...** panel. Bindings are stored under
+`[Keybinds]` in `UserData/Config/Asura.ini`, not as ReXGlue-specific
+configuration. During T05 the launcher translates those values into temporary
+runtime CVars.
+
+### Cursor/focus policy
+
+Cursor visibility and mouse capture are deliberately separate:
+- the pointer is hidden while the game window has focus when
+  `HideCursorInGame=1`;
+- losing focus restores the pointer immediately;
+- regaining focus hides it again;
+- mouse-look / relative capture remains opt-in and is controlled independently.
+
+This gives T05 the first focus-loss behavior needed for the later
+windowed/strong-Alt-Tab stability milestone without claiming that the full
+Alt-Tab stack is solved yet.
+
+Mouse-driven menu selection is explicitly out of scope for T05 and reserved for
+late-stage PC polish.
