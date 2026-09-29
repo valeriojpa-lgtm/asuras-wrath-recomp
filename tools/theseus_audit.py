@@ -296,6 +296,7 @@ def main() -> int:
         "T10.3 delegate presenter attachment",
         "T10.4 presentation detach hook",
         "T10.4 delegate presenter detach",
+        "T10.4 detach before hard exit",
     )
     missing_presentation_patch_markers = [
         marker for marker in presentation_patch_markers if marker not in patch_script
@@ -390,6 +391,7 @@ def main() -> int:
         "  Theseus owns stable host presentation policy from Asura.ini.",
         "  Asura overrides ReXApp host-window creation through the explicit presentation bridge.",
         "  Asura routes presenter attach and detach through the same lifecycle boundary.",
+        "  Normal hard-exit shutdown detaches presentation before TerminateTitle and std::_Exit.",
         "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
         "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
