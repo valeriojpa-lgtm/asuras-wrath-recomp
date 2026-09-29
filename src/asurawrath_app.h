@@ -8,6 +8,8 @@
 #include <rex/rex_app.h>
 
 #include "compat/rexglue_filesystem_bridge.h"
+#include "compat/rexglue_graphics_bridge.h"
+#include "platform/theseus_config.h"
 #include "platform/theseus_crash.h"
 #include "platform/theseus_platform.h"
 
@@ -85,13 +87,34 @@ public:
     theseus::crash::Breadcrumb("runtime: OnPreSetup");
     // T03: Theseus discovers the process location itself. Host filesystem
     // bootstrap no longer depends on ReXGlue.
-    theseus::Platform::Instance().BootstrapFromProcess();
+    auto& host = theseus::Platform::Instance();
+    host.BootstrapFromProcess();
+
+#if defined(_WIN32) && !defined(__ANDROID__)
+    // T10.2: the runtime child reconstructs the stable graphics policy from
+    // Theseus-owned Asura.ini, then explicitly injects the validated Xenos
+    // renderer through the compatibility bridge. ReXApp no longer chooses the
+    // concrete graphics backend on the normal portable path.
+    theseus::Config native_config;
+    if (theseus::LoadConfig(host.paths().config / "Asura.ini", native_config)) {
+      host.graphics().Configure(native_config.MakeGraphicsPolicy());
+      if (!asura::compat::InstallGraphicsBackend(config, host.graphics().state())) {
+        // Preserve the known-good legacy plugin path as a safety fallback.
+        config.gpu_plugin = "xenos";
+      }
+    } else if (config.gpu_plugin.empty()) {
+      config.gpu_plugin = "xenos";
+    }
+#endif
+
 #if defined(__ANDROID__)
     SDL_SetHint(SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY, "1");
 #endif
+#if defined(__ANDROID__)
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
+#endif
   }
 
   void SetupPcDataLayoutAliases() {
