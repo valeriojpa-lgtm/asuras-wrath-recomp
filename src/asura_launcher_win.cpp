@@ -781,10 +781,11 @@ struct LauncherState {
                  reinterpret_cast<LPARAM>(L"SDL"));
     SendMessageW(input_backend, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"XInput"));
+    CreateButton(hwnd, font, kControls, L"Controls...", 42, 366, 120, 30);
 
-    CreateLabel(hwnd, font, L"LANGUAGE", 28, 378, 180, 22);
-    CreateLabel(hwnd, font, L"Game language", 42, 412, 145, 24);
-    language = CreateCombo(hwnd, font, kLanguage, 195, 408, 280, 220);
+    CreateLabel(hwnd, font, L"LANGUAGE", 28, 414, 180, 22);
+    CreateLabel(hwnd, font, L"Game language", 42, 448, 145, 24);
+    language = CreateCombo(hwnd, font, kLanguage, 195, 444, 280, 220);
     for (const auto& option : kLanguages) {
       SendMessageW(language, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(option.label));
