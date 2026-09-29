@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T09.1 Theseus dependency audit.
+"""T09.3 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -227,10 +227,25 @@ def main() -> int:
         else "FAIL"
     )
 
+    input_serialization_markers = (
+        "T09.3 InputSystem mutex include",
+        "T09.3 InputSystem state mutex",
+        "T09.3 serialize GetCapabilities",
+        "T09.3 serialize GetState",
+        "T09.3 serialize SetState",
+        "T09.3 serialize GetKeystroke",
+    )
+    missing_input_serialization_markers = [
+        marker for marker in input_serialization_markers if marker not in patch_script
+    ]
+    input_serialization_boundary = (
+        "PASS" if not missing_input_serialization_markers else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T09.1-hard-exit-guard",
+        "Milestone: T09.3-native-input-serialization",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -261,10 +276,11 @@ def main() -> int:
         "  threading sync : native",
         "  crash telemetry : native",
         "  hard-exit guard  : native",
+        "  input serialization : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
-        "  input      : native policy / rexglue physical-driver + XAM bridge",
+        "  input      : native policy / serialized rexglue physical-driver + XAM bridge",
         "  saves      : native host / rexglue XAM bridge",
         "  video      : guest Bink code / graphics path (not a standalone ReXGlue decoder)",
         "  audio      : native policy / rexglue XMA + SDL bridge",
@@ -283,12 +299,13 @@ def main() -> int:
 
     lines += [
         "",
-        "T09.1 invariant:",
+        "T09.3 invariant:",
+        "  Native release build: no AddressSanitizer, heap probe, or diagnostic runtime dependency.",
+        "  The only T09.2 behavior carried forward is serialized InputSystem state access.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
         "  In-process unhandled failures still produce text reports plus minidumps.",
         "  The launcher survives as an external guard while the game runs in a normal child process.",
         "  Hard exits that bypass SEH produce TheseusHardExit reports with the child exit code.",
-        "  The child is not debugged, preserving normal timing and IsDebuggerPresent behavior.",
         "  StabilitySession.txt remains the child runtime breadcrumb log.",
         "",
     ]
@@ -358,6 +375,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 10
+    if input_serialization_boundary != "PASS":
+        print(
+            "ERROR: T09.3 native input serialization fix is incomplete.",
+            file=sys.stderr,
+        )
+        return 11
     return 0
 
 
