@@ -15,7 +15,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T08-native-threading-sync";
+inline constexpr std::string_view kMilestone = "T09-exe-stability";
 
 enum class Backend {
   kReXGlue,
