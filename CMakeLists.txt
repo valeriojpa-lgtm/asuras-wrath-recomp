@@ -91,6 +91,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_audio.cpp
   src/platform/theseus_timing.cpp
   src/platform/theseus_threading.cpp
+  src/platform/theseus_crash.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
@@ -118,7 +119,7 @@ endif()
 if(WIN32 AND NOT ANDROID)
   set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "Asura's Wrath")
   target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_NATIVE_LAUNCHER=1)
-  target_link_libraries(asura_wrath_recomp PRIVATE dxgi comctl32)
+  target_link_libraries(asura_wrath_recomp PRIVATE dxgi comctl32 dbghelp psapi)
 else()
   set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "asura_wrath_recomp")
 endif()
