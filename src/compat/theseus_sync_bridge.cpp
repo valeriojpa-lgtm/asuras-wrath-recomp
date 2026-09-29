@@ -44,21 +44,21 @@ WaitOutcome TranslateWait(DWORD result) noexcept {
 
 }  // namespace
 
-void Yield() noexcept {
+void YieldHostThread() noexcept {
 #if defined(_WIN32)
   SwitchToThread();
 #endif
   std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
-void MemoryBarrier() noexcept {
+void FullMemoryFence() noexcept {
   std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
 void SleepMicros(std::uint64_t microseconds) noexcept {
 #if defined(_WIN32)
   if (microseconds < 100) {
-    Yield();
+    YieldHostThread();
     return;
   }
   ::Sleep(static_cast<DWORD>(microseconds / 1000));
