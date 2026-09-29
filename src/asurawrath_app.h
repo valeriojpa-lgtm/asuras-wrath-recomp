@@ -9,6 +9,7 @@
 
 #include "compat/rexglue_filesystem_bridge.h"
 #include "compat/rexglue_graphics_bridge.h"
+#include "compat/rexglue_presentation_bridge.h"
 #include "platform/theseus_config.h"
 #include "platform/theseus_crash.h"
 #include "platform/theseus_platform.h"
@@ -97,6 +98,7 @@ public:
     // concrete graphics backend on the normal portable path.
     theseus::Config native_config;
     if (theseus::LoadConfig(host.paths().config / "Asura.ini", native_config)) {
+      host.presentation().Configure(native_config.MakePresentationPolicy());
       host.graphics().Configure(native_config.MakeGraphicsPolicy());
       if (!asura::compat::InstallGraphicsBackend(config, host.graphics().state())) {
         // Preserve the known-good legacy plugin path as a safety fallback.
@@ -114,6 +116,40 @@ public:
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
+#endif
+  }
+
+  std::unique_ptr<rex::ui::Window> OnCreatePresentationWindow(
+      std::string_view title, std::uint32_t default_width,
+      std::uint32_t default_height) override {
+#if defined(_WIN32) && !defined(__ANDROID__)
+    (void)default_width;
+    (void)default_height;
+    auto& host = theseus::Platform::Instance();
+    if (!host.initialized()) {
+      host.BootstrapFromProcess();
+    }
+    auto window = asura::compat::CreatePresentationWindow(
+        app_context(), title, host.presentation().state());
+    if (window) {
+      theseus::crash::Breadcrumb("presentation: Theseus window created");
+    }
+    return window;
+#else
+    return rex::ReXApp::OnCreatePresentationWindow(
+        title, default_width, default_height);
+#endif
+  }
+
+  void OnAttachPresentationPresenter(
+      rex::ui::Window* window, rex::ui::Presenter* presenter) override {
+#if defined(_WIN32) && !defined(__ANDROID__)
+    if (window) {
+      asura::compat::AttachPresentationPresenter(*window, presenter);
+      theseus::crash::Breadcrumb("presentation: Theseus presenter attached");
+    }
+#else
+    rex::ReXApp::OnAttachPresentationPresenter(window, presenter);
 #endif
   }
 
