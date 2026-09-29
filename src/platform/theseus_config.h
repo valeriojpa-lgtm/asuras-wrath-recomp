@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "platform/theseus_audio.h"
 #include "platform/theseus_input.h"
 
 namespace theseus {
@@ -24,6 +25,16 @@ struct Config {
   double mouse_sensitivity = 1.0;
   bool hide_cursor_in_game = true;
   InputBindings keybinds{};
+
+  bool audio_mute = false;
+  int audio_queued_frames = 8;
+
+  [[nodiscard]] AudioPolicyState MakeAudioPolicy() const {
+    AudioPolicyState policy;
+    policy.mute = audio_mute;
+    policy.queued_frames = audio_queued_frames;
+    return policy;
+  }
 
   [[nodiscard]] InputPolicyState MakeInputPolicy() const {
     InputPolicyState policy;
