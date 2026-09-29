@@ -50,6 +50,17 @@ endif()
 
 include(generated/rexglue.cmake)
 
+# T07: project-owned timing core is temporarily linked into rexruntime so the
+# Xbox timing ABI can delegate to Theseus without reversing the DLL dependency.
+if(TARGET rexruntime)
+  target_sources(rexruntime PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/compat/theseus_timing_bridge.cpp"
+  )
+  target_include_directories(rexruntime PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+endif()
+
 if(ANDROID)
   set(ASURAWRATH_SOURCES
     src/main.cpp
@@ -70,6 +81,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_saves.cpp
   src/platform/theseus_input.cpp
   src/platform/theseus_audio.cpp
+  src/platform/theseus_timing.cpp
   src/compat/rexglue_filesystem_bridge.cpp
 )
 
