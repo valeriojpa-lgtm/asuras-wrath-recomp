@@ -269,26 +269,35 @@ void AppendSettingsArgs(std::vector<std::string>& args,
     args.emplace_back("--" + std::string(name) + "=" + std::string(value));
   };
 
+  auto& platform = theseus::Platform::Instance();
+  if (!platform.initialized()) {
+    platform.BootstrapFromProcess();
+  }
+
   add_int("window_width", s.width);
   add_int("window_height", s.height);
   add_bool("fullscreen", s.fullscreen);
-  add_string("gpu_backend", s.renderer == 1 ? "vulkan" : "d3d12");
 
-  if (s.renderer == 0) {
+  // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
+  // adapter, VSync and shader-compilation choices. The arguments below are a
+  // temporary adapter into the validated rexgpu-xenos renderer.
+  platform.graphics().Configure(s.MakeGraphicsPolicy());
+  const auto& graphics = platform.graphics().state();
+  add_string("gpu_backend",
+             graphics.backend == theseus::GraphicsBackend::kVulkan
+                 ? "vulkan"
+                 : "d3d12");
+
+  if (graphics.backend == theseus::GraphicsBackend::kD3D12) {
     const int adapter =
-        s.adapter >= 0 ? s.adapter : BestAdapterOrdinal(adapters);
+        graphics.adapter >= 0 ? graphics.adapter : BestAdapterOrdinal(adapters);
     if (adapter >= 0) {
       add_int("d3d12_adapter", adapter);
     }
   }
 
-  add_bool("vsync", s.vsync);
-  add_bool("async_shader_compilation", s.async_shaders);
-
-  auto& platform = theseus::Platform::Instance();
-  if (!platform.initialized()) {
-    platform.BootstrapFromProcess();
-  }
+  add_bool("vsync", graphics.vsync);
+  add_bool("async_shader_compilation", graphics.async_shaders);
 
   // T05 native input policy. The settings belong to Theseus; the arguments
   // below are only the temporary SDL/XInput + XAM compatibility adapter.
