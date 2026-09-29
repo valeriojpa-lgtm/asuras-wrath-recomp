@@ -157,6 +157,10 @@ Platform::Platform() {
   // T10.3: host presentation policy and the create/attach boundary belong to
   // Theseus. SDL Window and backend Presenter remain compatibility objects.
   backends_[static_cast<std::size_t>(Service::kPresentation)] = Backend::kNative;
+
+  // T11: physical monitor and display-mode discovery is project-owned.
+  // SDL still consumes the selected monitor index as a compatibility adapter.
+  backends_[static_cast<std::size_t>(Service::kDisplay)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
