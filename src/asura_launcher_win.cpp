@@ -34,6 +34,7 @@ constexpr wchar_t kLauncherTitle[] = L"Asura's Wrath - Settings";
 
 enum ControlId : int {
   kResolution = 1001,
+  kMonitor,
   kDisplayMode,
   kRenderer,
   kAdapter,
@@ -52,20 +53,23 @@ enum ControlId : int {
 };
 
 struct ResolutionOption {
-  int width;
-  int height;
-  const wchar_t* label;
+  int width = 0;
+  int height = 0;
+  std::wstring label;
 };
 
-constexpr ResolutionOption kResolutions[] = {
-    {1280, 720, L"1280 x 720"},
-    {1600, 900, L"1600 x 900"},
-    {1920, 1080, L"1920 x 1080"},
-    {2560, 1440, L"2560 x 1440"},
-    {2560, 1600, L"2560 x 1600"},
-    {3440, 1440, L"3440 x 1440"},
-    {3840, 2160, L"3840 x 2160"},
-};
+std::vector<ResolutionOption> FallbackResolutions() {
+  return {
+      {1280, 720, L"1280 x 720"},
+      {1600, 900, L"1600 x 900"},
+      {1920, 1080, L"1920 x 1080"},
+      {1920, 1200, L"1920 x 1200"},
+      {2560, 1440, L"2560 x 1440"},
+      {2560, 1600, L"2560 x 1600"},
+      {3440, 1440, L"3440 x 1440"},
+      {3840, 2160, L"3840 x 2160"},
+  };
+}
 
 struct LanguageOption {
   const wchar_t* label;
@@ -281,6 +285,7 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   const auto& presentation = platform.presentation().state();
   add_int("window_width", presentation.width);
   add_int("window_height", presentation.height);
+  add_int("monitor", presentation.monitor);
   add_bool("fullscreen", presentation.fullscreen);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
@@ -713,10 +718,12 @@ struct LauncherState {
   LauncherSettings settings;
   std::filesystem::path config_path;
   std::vector<AdapterOption> adapters;
+  std::vector<ResolutionOption> resolutions;
   HFONT font = nullptr;
   bool accepted = false;
 
   HWND resolution = nullptr;
+  HWND monitor = nullptr;
   HWND display_mode = nullptr;
   HWND renderer = nullptr;
   HWND adapter = nullptr;
@@ -730,12 +737,84 @@ struct LauncherState {
   HWND show_at_startup = nullptr;
 
   int FindResolutionIndex(int width, int height) const {
-    for (size_t i = 0; i < std::size(kResolutions); ++i) {
-      if (kResolutions[i].width == width && kResolutions[i].height == height) {
+    for (size_t i = 0; i < resolutions.size(); ++i) {
+      if (resolutions[i].width == width && resolutions[i].height == height) {
         return static_cast<int>(i);
       }
     }
     return 0;
+  }
+
+  int FindMonitorComboIndex(int configured_monitor) const {
+    const auto count = theseus::Platform::Instance().display().monitors().size();
+    return std::clamp(configured_monitor, 0, static_cast<int>(count));
+  }
+
+  void RebuildResolutionOptions(int monitor_selection,
+                                int preferred_width,
+                                int preferred_height) {
+    resolutions.clear();
+
+    auto& display = theseus::Platform::Instance().display();
+    const theseus::DisplayMonitor* selected = nullptr;
+    if (monitor_selection > 0) {
+      selected = display.MonitorByIndex(monitor_selection - 1);
+    }
+    if (!selected) {
+      selected = display.PrimaryMonitor();
+    }
+
+    if (selected) {
+      for (const auto& mode : selected->modes) {
+        const bool duplicate = std::any_of(
+            resolutions.begin(), resolutions.end(),
+            [&](const ResolutionOption& existing) {
+              return existing.width == mode.width &&
+                     existing.height == mode.height;
+            });
+        if (!duplicate) {
+          ResolutionOption option;
+          option.width = mode.width;
+          option.height = mode.height;
+          option.label = std::to_wstring(mode.width) + L" x " +
+                         std::to_wstring(mode.height);
+          resolutions.push_back(std::move(option));
+        }
+      }
+    }
+
+    if (resolutions.empty()) {
+      resolutions = FallbackResolutions();
+    }
+
+    std::sort(resolutions.begin(), resolutions.end(),
+              [](const ResolutionOption& a, const ResolutionOption& b) {
+                const auto area_a =
+                    static_cast<long long>(a.width) * a.height;
+                const auto area_b =
+                    static_cast<long long>(b.width) * b.height;
+                if (area_a != area_b) return area_a < area_b;
+                if (a.width != b.width) return a.width < b.width;
+                return a.height < b.height;
+              });
+
+    if (resolution) {
+      SendMessageW(resolution, CB_RESETCONTENT, 0, 0);
+      for (const auto& option : resolutions) {
+        SendMessageW(resolution, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(option.label.c_str()));
+      }
+      int selected_index =
+          FindResolutionIndex(preferred_width, preferred_height);
+      if (selected_index == 0 &&
+          (resolutions[0].width != preferred_width ||
+           resolutions[0].height != preferred_height) &&
+          selected && selected->current_mode.width > 0) {
+        selected_index = FindResolutionIndex(
+            selected->current_mode.width, selected->current_mode.height);
+      }
+      SendMessageW(resolution, CB_SETCURSEL, selected_index, 0);
+    }
   }
 
   int FindLanguageIndex(int language_id) const {
@@ -784,11 +863,28 @@ struct LauncherState {
 
     CreateLabel(hwnd, font, L"DISPLAY", 28, 24, 180, 22);
     CreateLabel(hwnd, font, L"Resolution", 42, 58, 145, 24);
-    resolution = CreateCombo(hwnd, font, kResolution, 195, 54, 280, 300);
-    for (const auto& option : kResolutions) {
-      SendMessageW(resolution, CB_ADDSTRING, 0,
-                   reinterpret_cast<LPARAM>(option.label));
+    resolution = CreateCombo(hwnd, font, kResolution, 195, 54, 265, 300);
+
+    CreateLabel(hwnd, font, L"Monitor", 478, 58, 70, 24);
+    monitor = CreateCombo(hwnd, font, kMonitor, 548, 54, 185, 300);
+    SendMessageW(monitor, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"Auto / primary"));
+    const auto& monitors =
+        theseus::Platform::Instance().display().monitors();
+    for (size_t i = 0; i < monitors.size(); ++i) {
+      const auto& display = monitors[i];
+      std::wstring label = L"Display " + std::to_wstring(i + 1);
+      if (display.primary) {
+        label += L" (Primary)";
+      }
+      if (!display.display_name.empty()) {
+        label += L" - " + display.display_name;
+      }
+      SendMessageW(monitor, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(label.c_str()));
     }
+
+    RebuildResolutionOptions(settings.monitor, settings.width, settings.height);
 
     CreateLabel(hwnd, font, L"Display mode", 42, 96, 145, 24);
     display_mode = CreateCombo(hwnd, font, kDisplayMode, 195, 92, 280, 120);
@@ -880,11 +976,17 @@ struct LauncherState {
   void ReadControlsToSettings() {
     int resolution_index =
         static_cast<int>(SendMessageW(resolution, CB_GETCURSEL, 0, 0));
-    resolution_index =
-        std::clamp(resolution_index, 0, static_cast<int>(std::size(kResolutions)) - 1);
-    settings.width = kResolutions[resolution_index].width;
-    settings.height = kResolutions[resolution_index].height;
+    if (resolutions.empty()) {
+      resolutions = FallbackResolutions();
+    }
+    resolution_index = std::clamp(
+        resolution_index, 0, static_cast<int>(resolutions.size()) - 1);
+    settings.width = resolutions[resolution_index].width;
+    settings.height = resolutions[resolution_index].height;
 
+    settings.monitor =
+        std::max(0, static_cast<int>(
+                        SendMessageW(monitor, CB_GETCURSEL, 0, 0)));
     settings.fullscreen = SendMessageW(display_mode, CB_GETCURSEL, 0, 0) == 0;
     settings.renderer =
         std::clamp(static_cast<int>(SendMessageW(renderer, CB_GETCURSEL, 0, 0)), 0, 1);
@@ -951,6 +1053,15 @@ LRESULT CALLBACK LauncherWndProc(HWND hwnd, UINT message,
         const int backend =
             static_cast<int>(SendMessageW(state->renderer, CB_GETCURSEL, 0, 0));
         EnableWindow(state->adapter, backend == 0);
+        return 0;
+      }
+      if (HIWORD(wparam) == CBN_SELCHANGE &&
+          LOWORD(wparam) == kMonitor) {
+        const int selected_monitor = std::max(
+            0, static_cast<int>(
+                   SendMessageW(state->monitor, CB_GETCURSEL, 0, 0)));
+        state->RebuildResolutionOptions(
+            selected_monitor, state->settings.width, state->settings.height);
         return 0;
       }
       if (HIWORD(wparam) == BN_CLICKED) {
@@ -1073,6 +1184,12 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
                            (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
   const bool force_hide = runtime_child || HasArg(args, "--no_launcher");
   RemoveCustomLauncherArgs(args);
+
+  auto& platform = theseus::Platform::Instance();
+  if (!platform.initialized()) {
+    platform.BootstrapFromProcess();
+  }
+  platform.display().Enumerate();
 
   LauncherState state;
   state.config_path = ConfigPath();
