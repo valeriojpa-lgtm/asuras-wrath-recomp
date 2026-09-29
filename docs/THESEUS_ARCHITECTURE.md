@@ -1,6 +1,6 @@
 # Asura's Wrath — Theseus PC Port
 
-## T06: Native Audio Policy
+## T07: Native Timing
 
 T01 introduced the **ReXGlue-independent PC platform boundary**. T02 moved
 portable path discovery and launcher configuration into that boundary. T03
@@ -298,3 +298,36 @@ The launcher exposes a minimal AUDIO section:
 - Buffer / latency: 4, 8, 16 or 32 queued frames
 
 Values are stored in `UserData/Config/Asura.ini` under `[Audio]`.
+
+
+## T07 timing boundary
+
+T07 moves the host clock and Xbox-compatible guest clock conversion into
+project-owned Theseus code.
+
+```
+Asura / UE3
+   |
+KeQueryPerformanceFrequency / KeQuerySystemTime / duration scaling
+   |
+ReXGlue xboxkrnl exports          [temporary ABI bridge]
+   |
+Theseus timing core              [native/project-owned]
+   |
+Windows QPC + FILETIME           [native host clock]
+```
+
+The timing core preserves the validated baseline behavior:
+- guest performance-counter frequency: 50 MHz;
+- normal time scale: 1.0x;
+- monotonic host clock: QueryPerformanceCounter;
+- host wall clock: FILETIME;
+- guest duration scaling remains compatible with ReXGlue's existing rules.
+
+The project-owned timing bridge is compiled temporarily into `rexruntime.dll`
+because the Xbox kernel exports still live there. It contains no ReXGlue
+dependencies and can move out when that ABI bridge is removed.
+
+T07 does **not** migrate wait objects, timer objects, events, semaphores,
+thread scheduling or synchronization. Those remain the scope of the following
+threading/synchronization milestone.
