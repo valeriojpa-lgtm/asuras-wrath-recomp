@@ -15,7 +15,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T09.1-hard-exit-guard";
+inline constexpr std::string_view kMilestone = "T09.2-heap-corruption-probe";
 
 enum class Backend {
   kReXGlue,
