@@ -21,4 +21,6 @@ std::unique_ptr<rex::ui::Window> CreatePresentationWindow(
 void AttachPresentationPresenter(rex::ui::Window& window,
                                  rex::ui::Presenter* presenter);
 
+void DetachPresentationPresenter(rex::ui::Window& window);
+
 }  // namespace asura::compat
