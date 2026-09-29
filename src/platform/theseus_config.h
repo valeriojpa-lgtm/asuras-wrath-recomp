@@ -5,6 +5,7 @@
 #include "platform/theseus_audio.h"
 #include "platform/theseus_graphics.h"
 #include "platform/theseus_input.h"
+#include "platform/theseus_presentation.h"
 
 namespace theseus {
 
@@ -12,6 +13,14 @@ struct Config {
   int width = 1280;
   int height = 720;
   bool fullscreen = true;
+
+  [[nodiscard]] PresentationPolicyState MakePresentationPolicy() const {
+    PresentationPolicyState policy;
+    policy.width = width;
+    policy.height = height;
+    policy.fullscreen = fullscreen;
+    return policy;
+  }
 
   // Kept as stable Theseus values so the UI is independent of the current
   // runtime adapter: 0 = D3D12, 1 = Vulkan.
