@@ -1052,7 +1052,9 @@ threading_win_cpp = Path("tools/rexglue/src/core/threading_win.cpp")
 old_t08_sync_include = """#include <rex/assert.h>
 #include <rex/chrono/chrono_steady_cast.h>"""
 
-new_t08_sync_include = """#include <rex/assert.h>
+new_t08_sync_include = """#include <limits>
+
+#include <rex/assert.h>
 #include <rex/chrono/chrono_steady_cast.h>
 
 #include "compat/theseus_sync_bridge.h"
