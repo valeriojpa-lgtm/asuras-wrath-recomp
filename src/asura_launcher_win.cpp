@@ -10,6 +10,7 @@
 #include "asura_launcher_win.h"
 #include "resource.h"
 #include "platform/theseus_config.h"
+#include "platform/theseus_crash.h"
 #include "platform/theseus_platform.h"
 
 #include <windows.h>
@@ -1035,6 +1036,8 @@ bool ShowLauncher(LauncherState& state) {
 }  // namespace
 
 bool RunNativeLauncher(std::vector<std::string>& args) {
+  theseus::crash::Install();
+  theseus::crash::Breadcrumb("launcher: enter");
   SetProcessDPIAware();
 
   const bool force_show = HasArg(args, "--launcher") ||
@@ -1063,10 +1066,21 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
   const bool should_show =
       !force_hide && (force_show || !has_config || state.settings.show_at_startup);
   if (should_show && !ShowLauncher(state)) {
+    theseus::crash::Breadcrumb("launcher: cancelled");
     return false;
   }
 
   AppendSettingsArgs(args, state.settings, state.adapters);
+
+  std::string stability =
+      "launcher: play renderer=" +
+      std::string(state.settings.renderer == 1 ? "vulkan" : "d3d12") +
+      " resolution=" + std::to_string(state.settings.width) + "x" +
+      std::to_string(state.settings.height) +
+      " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
+      " vsync=" + (state.settings.vsync ? "1" : "0") +
+      " async_shaders=" + (state.settings.async_shaders ? "1" : "0");
+  theseus::crash::Breadcrumb(stability);
   return true;
 }
 
