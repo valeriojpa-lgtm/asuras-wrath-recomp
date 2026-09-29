@@ -60,6 +60,11 @@ if(TARGET rexruntime)
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
   )
 endif()
+if(TARGET rexcore)
+  target_include_directories(rexcore PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+endif()
 
 if(ANDROID)
   set(ASURAWRATH_SOURCES
