@@ -10,13 +10,14 @@
 #include "platform/theseus_filesystem.h"
 #include "platform/theseus_graphics.h"
 #include "platform/theseus_input.h"
+#include "platform/theseus_presentation.h"
 #include "platform/theseus_saves.h"
 #include "platform/theseus_timing.h"
 #include "platform/theseus_threading.h"
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T10.2-graphics-backend-bridge";
+inline constexpr std::string_view kMilestone = "T10.3-native-presentation-boundary";
 
 enum class Backend {
   kReXGlue,
@@ -32,6 +33,7 @@ enum class Service : std::size_t {
   kTiming,
   kThreading,
   kGraphics,
+  kPresentation,
   kCount,
 };
 
@@ -76,6 +78,8 @@ class Platform final {
   [[nodiscard]] const NativeAudioPolicy& audio() const noexcept { return audio_; }
   [[nodiscard]] NativeGraphicsPolicy& graphics() noexcept { return graphics_; }
   [[nodiscard]] const NativeGraphicsPolicy& graphics() const noexcept { return graphics_; }
+  [[nodiscard]] NativePresentationPolicy& presentation() noexcept { return presentation_; }
+  [[nodiscard]] const NativePresentationPolicy& presentation() const noexcept { return presentation_; }
   [[nodiscard]] NativeTimingPolicy& timing() noexcept { return timing_; }
   [[nodiscard]] const NativeTimingPolicy& timing() const noexcept { return timing_; }
   [[nodiscard]] NativeThreadingService& threading() noexcept { return threading_; }
@@ -91,6 +95,7 @@ class Platform final {
   NativeInputPolicy input_{};
   NativeAudioPolicy audio_{};
   NativeGraphicsPolicy graphics_{};
+  NativePresentationPolicy presentation_{};
   NativeTimingPolicy timing_{};
   NativeThreadingService threading_{};
   std::array<Backend, static_cast<std::size_t>(Service::kCount)> backends_{};
