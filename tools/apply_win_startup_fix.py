@@ -753,3 +753,290 @@ new_t06_audio_metadata = """  // T06: expose the actual game identity to the hos
 
 patch_once(sdl_audio_cpp, old_t06_audio_metadata, new_t06_audio_metadata,
            "T06 host audio app identity")
+
+
+# 10) Theseus T07 native timing. ReXGlue keeps the Xbox kernel export ABI, but
+# its public Clock surface delegates host/guest timing to project-owned code.
+clock_cpp = Path("tools/rexglue/src/core/clock.cpp")
+
+old_t07_clock_include = """#include <rex/chrono/clock.h>
+#include <rex/cvar.h>
+#include <rex/math.h>"""
+
+new_t07_clock_include = """#include <rex/chrono/clock.h>
+#include <rex/cvar.h>
+#include <rex/math.h>
+
+#include "compat/theseus_timing_bridge.h""""
+
+patch_once(clock_cpp, old_t07_clock_include, new_t07_clock_include,
+           "T07 timing bridge include")
+
+old_t07_public_clock = """uint64_t Clock::QueryHostTickFrequency() {
+#if REX_CLOCK_RAW_AVAILABLE
+  if (REXCVAR_GET(clock_source_raw)) {
+    return host_tick_frequency_raw();
+  }
+#endif
+  return host_tick_frequency_platform();
+}
+uint64_t Clock::QueryHostTickCount() {
+#if REX_CLOCK_RAW_AVAILABLE
+  if (REXCVAR_GET(clock_source_raw)) {
+    return host_tick_count_raw();
+  }
+#endif
+  return host_tick_count_platform();
+}
+
+double Clock::guest_time_scalar() {
+  return guest_time_scalar_;
+}
+
+void Clock::set_guest_time_scalar(double scalar) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return;
+  }
+
+  guest_time_scalar_ = scalar;
+  RecomputeGuestTickScalar();
+}
+
+std::pair<uint64_t, uint64_t> Clock::guest_tick_ratio() {
+  std::lock_guard<std::mutex> lock(tick_mutex_);
+  return guest_tick_ratio_;
+}
+
+uint64_t Clock::guest_tick_frequency() {
+  return guest_tick_frequency_;
+}
+
+void Clock::set_guest_tick_frequency(uint64_t frequency) {
+  guest_tick_frequency_ = frequency;
+  RecomputeGuestTickScalar();
+}
+
+uint64_t Clock::guest_system_time_base() {
+  return guest_system_time_base_;
+}
+
+void Clock::set_guest_system_time_base(uint64_t time_base) {
+  guest_system_time_base_ = time_base;
+}
+
+uint64_t Clock::QueryGuestTickCount() {
+  auto guest_tick_count = UpdateGuestClock();
+  return guest_tick_count;
+}
+
+uint64_t Clock::QueryGuestSystemTime() {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return Clock::QueryHostSystemTime();
+  }
+
+  auto guest_system_time_offset = QueryGuestSystemTimeOffset();
+  return guest_system_time_base_ + guest_system_time_offset;
+}
+
+uint32_t Clock::QueryGuestUptimeMillis() {
+  return static_cast<uint32_t>(std::min<uint64_t>(QueryGuestSystemTimeOffset() / 10000,
+                                                  std::numeric_limits<uint32_t>::max()));
+}
+
+void Clock::SetGuestSystemTime(uint64_t system_time) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    // Time is fixed to host time.
+    return;
+  }
+
+  // Query the filetime offset to calculate a new base time.
+  auto guest_system_time_offset = QueryGuestSystemTimeOffset();
+  guest_system_time_base_ = system_time - guest_system_time_offset;
+}
+
+uint32_t Clock::ScaleGuestDurationMillis(uint32_t guest_ms) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return guest_ms;
+  }
+
+  constexpr uint64_t max = std::numeric_limits<uint32_t>::max();
+
+  if (guest_ms >= max) {
+    return max;
+  } else if (!guest_ms) {
+    return 0;
+  }
+  uint64_t scaled_ms =
+      static_cast<uint64_t>((static_cast<uint64_t>(guest_ms) * guest_time_scalar_));
+  return static_cast<uint32_t>(std::min(scaled_ms, max));
+}
+
+int64_t Clock::ScaleGuestDurationFileTime(int64_t guest_file_time) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return static_cast<uint64_t>(guest_file_time);
+  }
+
+  if (!guest_file_time) {
+    return 0;
+  } else if (guest_file_time > 0) {
+    // Absolute time.
+    uint64_t guest_time = Clock::QueryGuestSystemTime();
+    int64_t relative_time = guest_file_time - static_cast<int64_t>(guest_time);
+    int64_t scaled_time = static_cast<int64_t>(relative_time * guest_time_scalar_);
+    return static_cast<int64_t>(guest_time) + scaled_time;
+  } else {
+    // Relative time.
+    uint64_t scaled_file_time =
+        static_cast<uint64_t>((static_cast<uint64_t>(guest_file_time) * guest_time_scalar_));
+    // TODO(benvanik): check for overflow?
+    return scaled_file_time;
+  }
+}
+
+void Clock::ScaleGuestDurationTimeval(int32_t* tv_sec, int32_t* tv_usec) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return;
+  }
+
+  uint64_t scaled_sec = static_cast<uint64_t>(static_cast<uint64_t>(*tv_sec) * guest_time_scalar_);
+  uint64_t scaled_usec =
+      static_cast<uint64_t>(static_cast<uint64_t>(*tv_usec) * guest_time_scalar_);
+  if (scaled_usec > std::numeric_limits<uint32_t>::max()) {
+    uint64_t overflow_sec = scaled_usec / 1000000;
+    scaled_usec -= overflow_sec * 1000000;
+    scaled_sec += overflow_sec;
+  }
+  *tv_sec = int32_t(scaled_sec);
+  *tv_usec = int32_t(scaled_usec);
+}"""
+
+new_t07_public_clock = """uint64_t Clock::QueryHostTickFrequency() {
+  return theseus::timing::HostTickFrequency();
+}
+
+uint64_t Clock::QueryHostTickCount() {
+  return theseus::timing::HostTickCount();
+}
+
+double Clock::guest_time_scalar() {
+  return theseus::timing::GuestTimeScalar();
+}
+
+void Clock::set_guest_time_scalar(double scalar) {
+  if (REXCVAR_GET(clock_no_scaling)) {
+    return;
+  }
+  theseus::timing::SetGuestTimeScalar(scalar);
+}
+
+std::pair<uint64_t, uint64_t> Clock::guest_tick_ratio() {
+  return theseus::timing::GuestTickRatio();
+}
+
+uint64_t Clock::guest_tick_frequency() {
+  return theseus::timing::GuestTickFrequency();
+}
+
+void Clock::set_guest_tick_frequency(uint64_t frequency) {
+  theseus::timing::SetGuestTickFrequency(frequency);
+}
+
+uint64_t Clock::guest_system_time_base() {
+  return theseus::timing::GuestSystemTimeBase();
+}
+
+void Clock::set_guest_system_time_base(uint64_t time_base) {
+  theseus::timing::SetGuestSystemTimeBase(time_base);
+}
+
+uint64_t Clock::QueryGuestTickCount() {
+  return theseus::timing::QueryGuestTickCount(REXCVAR_GET(clock_no_scaling));
+}
+
+uint64_t Clock::QueryGuestSystemTime() {
+  return theseus::timing::QueryGuestSystemTime(REXCVAR_GET(clock_no_scaling));
+}
+
+uint32_t Clock::QueryGuestUptimeMillis() {
+  return theseus::timing::QueryGuestUptimeMillis(REXCVAR_GET(clock_no_scaling));
+}
+
+void Clock::SetGuestSystemTime(uint64_t system_time) {
+  theseus::timing::SetGuestSystemTime(system_time, REXCVAR_GET(clock_no_scaling));
+}
+
+uint32_t Clock::ScaleGuestDurationMillis(uint32_t guest_ms) {
+  return theseus::timing::ScaleGuestDurationMillis(
+      guest_ms, REXCVAR_GET(clock_no_scaling));
+}
+
+int64_t Clock::ScaleGuestDurationFileTime(int64_t guest_file_time) {
+  return theseus::timing::ScaleGuestDurationFileTime(
+      guest_file_time, REXCVAR_GET(clock_no_scaling));
+}
+
+void Clock::ScaleGuestDurationTimeval(int32_t* tv_sec, int32_t* tv_usec) {
+  theseus::timing::ScaleGuestDurationTimeval(
+      tv_sec, tv_usec, REXCVAR_GET(clock_no_scaling));
+}"""
+
+patch_once(clock_cpp, old_t07_public_clock, new_t07_public_clock,
+           "T07 delegate ReXGlue clock surface to Theseus")
+
+
+clock_win_cpp = Path("tools/rexglue/src/core/clock_win.cpp")
+
+old_t07_clock_win_include = """#include <rex/chrono/clock.h>
+#include <rex/platform.h>"""
+
+new_t07_clock_win_include = """#include <rex/chrono/clock.h>
+#include <rex/platform.h>
+
+#include "compat/theseus_timing_bridge.h""""
+
+patch_once(clock_win_cpp, old_t07_clock_win_include, new_t07_clock_win_include,
+           "T07 Windows host clock bridge include")
+
+old_t07_clock_win_impl = """uint64_t Clock::host_tick_frequency_platform() {
+  LARGE_INTEGER frequency;
+  QueryPerformanceFrequency(&frequency);
+  return frequency.QuadPart;
+}
+
+uint64_t Clock::host_tick_count_platform() {
+  LARGE_INTEGER counter;
+  uint64_t time = 0;
+  if (QueryPerformanceCounter(&counter)) {
+    time = counter.QuadPart;
+  }
+  return time;
+}
+
+uint64_t Clock::QueryHostSystemTime() {
+  FILETIME t;
+  GetSystemTimeAsFileTime(&t);
+  return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime;
+}
+
+uint64_t Clock::QueryHostUptimeMillis() {
+  return host_tick_count_platform() * 1000 / host_tick_frequency_platform();
+}"""
+
+new_t07_clock_win_impl = """uint64_t Clock::host_tick_frequency_platform() {
+  return theseus::timing::HostTickFrequency();
+}
+
+uint64_t Clock::host_tick_count_platform() {
+  return theseus::timing::HostTickCount();
+}
+
+uint64_t Clock::QueryHostSystemTime() {
+  return theseus::timing::HostSystemTime();
+}
+
+uint64_t Clock::QueryHostUptimeMillis() {
+  return theseus::timing::HostUptimeMillis();
+}"""
+
+patch_once(clock_win_cpp, old_t07_clock_win_impl, new_t07_clock_win_impl,
+           "T07 delegate Windows host clock to Theseus")
