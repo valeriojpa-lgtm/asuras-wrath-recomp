@@ -324,10 +324,29 @@ def main() -> int:
         else "FAIL"
     )
 
+    display_header = read_text(repo / "src" / "platform" / "theseus_display.h")
+    display_source = read_text(repo / "src" / "platform" / "theseus_display.cpp")
+    display_boundary = (
+        "PASS"
+        if "class NativeDisplayService" in display_header
+        and "struct DisplayMonitor" in display_header
+        and "struct DisplayMode" in display_header
+        and "EnumDisplayDevicesW" in display_source
+        and "EnumDisplaySettingsW" in display_source
+        and "platform.display().Enumerate()" in launcher_source
+        and "RebuildResolutionOptions" in launcher_source
+        and 'add_int("monitor", presentation.monitor)' in launcher_source
+        and "Service::kDisplay" in platform_source
+        and "src/platform/theseus_display.cpp" in cmake_source
+        and "1920, 1200" in launcher_source
+        and "3440, 1440" in launcher_source
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T10.4-presentation-lifecycle",
+        "Milestone: T11-native-display-modes",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -348,8 +367,9 @@ def main() -> int:
         f"Audio compatibility bridge: {audio_bridge_boundary}",
         f"Graphics backend compatibility bridge: {graphics_backend_bridge}",
         f"Native presentation boundary: {presentation_boundary}",
+        f"Native display-mode discovery: {display_boundary}",
         "",
-        "Native host facilities (T10.4):",
+        "Native host facilities (T11):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -358,6 +378,7 @@ def main() -> int:
         "  audio policy   : native",
         "  graphics policy : native",
         "  presentation boundary : native",
+        "  display modes : native",
         "  timing         : native",
         "  threading sync : native",
         "  crash telemetry : native",
@@ -374,6 +395,7 @@ def main() -> int:
         "  threading  : native host sync / rexglue XThread+APC+DPC ABI bridge",
         "  graphics   : native policy + backend injection / rexgpu-xenos compatibility renderer",
         "  presentation : Theseus create+attach+detach lifecycle / rexglue SDL Window + backend Presenter",
+        "  display     : native Win32 monitor+mode discovery / SDL monitor-index compatibility bridge",
         "",
         "Host files with direct ReXGlue references:",
     ]
@@ -386,12 +408,12 @@ def main() -> int:
 
     lines += [
         "",
-        "T10.4 invariant:",
-        "  T10.3 remains the validated host presentation baseline.",
-        "  Theseus owns stable host presentation policy from Asura.ini.",
-        "  Asura overrides ReXApp host-window creation through the explicit presentation bridge.",
-        "  Asura routes presenter attach and detach through the same lifecycle boundary.",
-        "  Normal hard-exit shutdown detaches presentation before TerminateTitle and std::_Exit.",
+        "T11 invariant:",
+        "  T10.4 remains the validated/frozen presentation lifecycle baseline.",
+        "  Theseus enumerates attached desktop displays and their modes through Win32.",
+        "  The launcher resolution list is generated from the selected native display.",
+        "  1920x1200 is preserved in the fallback set for 16:10 validation.",
+        "  Monitor selection is persisted by Theseus and bridged temporarily to SDL.",
         "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
         "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
@@ -491,6 +513,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 14
+    if display_boundary != "PASS":
+        print(
+            "ERROR: T11 native display-mode discovery is incomplete.",
+            file=sys.stderr,
+        )
+        return 15
     return 0
 
 
