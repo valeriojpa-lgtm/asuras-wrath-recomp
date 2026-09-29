@@ -136,6 +136,10 @@ Platform::Platform() {
   // T05: input policy/configuration belongs to Theseus. Physical SDL/XInput
   // drivers and the guest XAM ABI remain temporary compatibility bridges.
   backends_[static_cast<std::size_t>(Service::kInput)] = Backend::kNative;
+
+  // T06: audio policy/configuration belongs to Theseus. XMA decode, the guest
+  // XAudio/XMA ABI and SDL sample submission remain temporary bridges.
+  backends_[static_cast<std::size_t>(Service::kAudio)] = Backend::kNative;
 }
 
 bool Platform::Bootstrap(const std::filesystem::path& executable_root) {
