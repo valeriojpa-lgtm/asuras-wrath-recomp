@@ -23,8 +23,8 @@ enum class AlertableSleepOutcome : std::uint8_t {
   kAlerted,
 };
 
-void Yield() noexcept;
-void MemoryBarrier() noexcept;
+void YieldHostThread() noexcept;
+void FullMemoryFence() noexcept;
 void SleepMicros(std::uint64_t microseconds) noexcept;
 AlertableSleepOutcome AlertableSleepMicros(std::uint64_t microseconds) noexcept;
 
