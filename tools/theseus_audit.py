@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T09.1 Theseus dependency audit.
+"""T09.2 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -227,10 +227,33 @@ def main() -> int:
         else "FAIL"
     )
 
+    heap_probe_header = read_text(
+        repo / "src" / "platform" / "theseus_heap_probe.h"
+    )
+    heap_probe_source = read_text(
+        repo / "src" / "platform" / "theseus_heap_probe.cpp"
+    )
+    cmake_source = read_text(repo / "CMakeLists.txt")
+    heap_probe_rex_refs = sum(
+        len(pattern.findall(heap_probe_source)) for pattern in REX_PATTERNS
+    )
+    heap_probe_boundary = (
+        "PASS"
+        if "ASURA_ENABLE_ASAN" in cmake_source
+        and "-fsanitize=address" in cmake_source
+        and "ConfigureChildEnvironment" in heap_probe_header
+        and "TriggerAsanSelfTest" in heap_probe_header
+        and "ASAN_OPTIONS" in heap_probe_source
+        and "heap-buffer-overflow" in heap_probe_source
+        and "--theseus_asan_test" in launcher_source
+        and heap_probe_rex_refs == 0
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T09.1-hard-exit-guard",
+        "Milestone: T09.2-heap-corruption-probe",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -261,6 +284,7 @@ def main() -> int:
         "  threading sync : native",
         "  crash telemetry : native",
         "  hard-exit guard  : native",
+        "  heap probe       : native diagnostic",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
@@ -283,13 +307,12 @@ def main() -> int:
 
     lines += [
         "",
-        "T09.1 invariant:",
-        "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
-        "  In-process unhandled failures still produce text reports plus minidumps.",
-        "  The launcher survives as an external guard while the game runs in a normal child process.",
-        "  Hard exits that bypass SEH produce TheseusHardExit reports with the child exit code.",
-        "  The child is not debugged, preserving normal timing and IsDebuggerPresent behavior.",
-        "  StabilitySession.txt remains the child runtime breadcrumb log.",
+        "T09.2 invariant:",
+        "  This is a diagnostic branch, not a replacement baseline.",
+        "  Full host/ReXGlue code is AddressSanitizer-instrumented when ASURA_ENABLE_ASAN=ON.",
+        "  The guarded child inherits portable ASan logging and symbolizer settings.",
+        "  Standard crash/minidump and hard-exit reporting remain active.",
+        "  CI must prove a deliberate heap overflow is detected before packaging.",
         "",
     ]
 
@@ -358,6 +381,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 10
+    if heap_probe_boundary != "PASS":
+        print(
+            "ERROR: T09.2 heap corruption probe is incomplete or contaminated.",
+            file=sys.stderr,
+        )
+        return 11
     return 0
 
 
