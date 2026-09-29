@@ -117,7 +117,10 @@ elseif(APPLE)
 endif()
 
 if(WIN32 AND NOT ANDROID)
-  set_target_properties(asura_wrath_recomp PROPERTIES OUTPUT_NAME "Asura's Wrath")
+  set_target_properties(asura_wrath_recomp PROPERTIES
+    OUTPUT_NAME "Asura's Wrath"
+    WIN32_EXECUTABLE TRUE
+  )
   target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_NATIVE_LAUNCHER=1)
   target_link_libraries(asura_wrath_recomp PRIVATE dxgi comctl32 dbghelp psapi)
 else()
