@@ -89,6 +89,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/platform/theseus_saves.cpp
   src/platform/theseus_input.cpp
   src/platform/theseus_audio.cpp
+  src/platform/theseus_graphics.cpp
   src/platform/theseus_timing.cpp
   src/platform/theseus_threading.cpp
   src/platform/theseus_crash.cpp
