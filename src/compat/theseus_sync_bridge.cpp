@@ -175,7 +175,7 @@ WaitManyResult WaitMany(void* const* handles, std::size_t count,
 #endif
 }
 
-void* CreateEvent(bool manual_reset, bool initial_state) noexcept {
+void* CreateEventHandle(bool manual_reset, bool initial_state) noexcept {
 #if defined(_WIN32)
   return ::CreateEventW(nullptr, manual_reset ? TRUE : FALSE,
                         initial_state ? TRUE : FALSE, nullptr);
@@ -208,7 +208,7 @@ bool PulseEventSignaled(void* handle) noexcept {
 #endif
 }
 
-void* CreateSemaphore(std::int32_t initial_count,
+void* CreateSemaphoreHandle(std::int32_t initial_count,
                       std::int32_t maximum_count) noexcept {
 #if defined(_WIN32)
   return ::CreateSemaphoreW(nullptr, initial_count, maximum_count, nullptr);
@@ -228,7 +228,7 @@ bool ReleaseSemaphore(void* handle, std::int32_t release_count,
 #endif
 }
 
-void* CreateMutex(bool initial_owner) noexcept {
+void* CreateMutexHandle(bool initial_owner) noexcept {
 #if defined(_WIN32)
   return ::CreateMutexW(nullptr, initial_owner ? TRUE : FALSE, nullptr);
 #else
@@ -244,7 +244,7 @@ bool ReleaseMutex(void* handle) noexcept {
 #endif
 }
 
-void* CreateWaitableTimer(bool manual_reset) noexcept {
+void* CreateWaitableTimerHandle(bool manual_reset) noexcept {
 #if defined(_WIN32)
   return ::CreateWaitableTimerW(nullptr, manual_reset ? TRUE : FALSE, nullptr);
 #else
