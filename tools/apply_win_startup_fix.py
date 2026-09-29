@@ -1733,3 +1733,66 @@ new_t103_presenter_attach = """    OnAttachPresentationPresenter(window_.get(), 
 
 patch_once(rex_app_cpp, old_t103_presenter_attach, new_t103_presenter_attach,
            "T10.3 delegate presenter attachment")
+
+
+
+# 15) Theseus T10.4 presentation lifecycle completion.
+# T10.3 routed host-window creation and presenter attachment through project
+# hooks. Complete the lifecycle by routing presenter detachment through the
+# same boundary during shutdown.
+old_t104_detach_hook = """  virtual void OnAttachPresentationPresenter(ui::Window* window,
+                                             ui::Presenter* presenter);
+
+  // --- Window event hooks (delivered on the UI thread) ---"""
+
+new_t104_detach_hook = """  virtual void OnAttachPresentationPresenter(ui::Window* window,
+                                             ui::Presenter* presenter);
+  virtual void OnDetachPresentationPresenter(ui::Window* window);
+
+  // --- Window event hooks (delivered on the UI thread) ---"""
+
+patch_once(rex_app_h, old_t104_detach_hook, new_t104_detach_hook,
+           "T10.4 presentation detach hook")
+
+old_t104_detach_impl = """void ReXApp::OnAttachPresentationPresenter(ui::Window* window,
+                                           ui::Presenter* presenter) {
+  if (window) {
+    window->SetPresenter(presenter);
+  }
+}
+
+bool ReXApp::SetupPresentation() {"""
+
+new_t104_detach_impl = """void ReXApp::OnAttachPresentationPresenter(ui::Window* window,
+                                           ui::Presenter* presenter) {
+  if (window) {
+    window->SetPresenter(presenter);
+  }
+}
+
+void ReXApp::OnDetachPresentationPresenter(ui::Window* window) {
+  if (window) {
+    window->SetPresenter(nullptr);
+  }
+}
+
+bool ReXApp::SetupPresentation() {"""
+
+patch_once(rex_app_cpp, old_t104_detach_impl, new_t104_detach_impl,
+           "T10.4 default presentation detach hook")
+
+old_t104_shutdown_detach = """  // Window/runtime cleanup
+  if (window_) {
+    window_->SetPresenter(nullptr);
+  }
+  if (module_thread_.joinable()) {"""
+
+new_t104_shutdown_detach = """  // Window/runtime cleanup. Asura routes presenter detachment through the
+  // Theseus presentation lifecycle boundary.
+  if (window_) {
+    OnDetachPresentationPresenter(window_.get());
+  }
+  if (module_thread_.joinable()) {"""
+
+patch_once(rex_app_cpp, old_t104_shutdown_detach, new_t104_shutdown_detach,
+           "T10.4 delegate presenter detach")
