@@ -590,3 +590,48 @@ This boundary prepares T11 to replace fixed/preset display behavior with
 project-owned display enumeration and resolution handling. The strong T11
 validation resolutions are 1920x1200, 2560x1600 and 3440x1440, alongside
 standard 16:9 modes.
+
+
+## T10.4: Presentation Lifecycle Boundary
+
+T10.4 completes the host presentation lifecycle started in T10.3.
+
+T10.3 already routed host-window creation and presenter attachment through
+Theseus. Shutdown still detached the presenter directly inside ReXApp, leaving
+one ownership escape hatch. T10.4 closes it.
+
+```
+Theseus NativePresentationPolicy
+          |
+          v
+Create host window
+          |
+Attach backend Presenter
+          |
+      gameplay
+          |
+Detach backend Presenter
+          |
+Destroy host window
+```
+
+The concrete SDL Window and D3D12/Vulkan Presenter are still compatibility
+objects, but the **lifecycle decision points** are project-owned.
+
+T10.4 is intentionally small:
+- no swapchain rewrite;
+- no surface implementation rewrite;
+- no Xenos command processor changes;
+- no shader translator changes.
+
+The frozen T10.3 branch remains the immediate rollback baseline. With
+create/attach/detach under one boundary, the next major stage can move to T11
+and make display modes, monitor enumeration, aspect-ratio handling and
+resolution selection project-owned without reopening the basic presentation
+lifecycle.
+
+T11 strong validation resolutions:
+- 1920x1200 (16:10)
+- 2560x1600 (16:10)
+- 3440x1440 (21:9)
+- standard 16:9 modes as compatibility references
