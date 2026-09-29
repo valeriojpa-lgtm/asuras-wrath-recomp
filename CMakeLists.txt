@@ -137,7 +137,17 @@ if(ASURA_ENABLE_ASAN)
     -g
   )
   target_link_options(asura_wrath_recomp PRIVATE -fsanitize=address)
-  target_compile_definitions(asura_wrath_recomp PRIVATE ASURA_HEAP_PROBE=1)
+  # LLVM's Windows STL enables ASan container annotations automatically in
+  # sanitized translation units. The recompiled guest object library remains
+  # deliberately unsanitized in T09.2b, so mixing annotate_string/vector=1
+  # host objects with annotate_string/vector=0 guest objects triggers
+  # /FAILIFMISMATCH at link time. Disable only those STL container annotations
+  # on the host; ordinary ASan stack/heap instrumentation remains enabled.
+  target_compile_definitions(asura_wrath_recomp PRIVATE
+    ASURA_HEAP_PROBE=1
+    _DISABLE_STRING_ANNOTATION
+    _DISABLE_VECTOR_ANNOTATION
+  )
 endif()
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
