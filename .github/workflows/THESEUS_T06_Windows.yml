@@ -71,7 +71,7 @@ jobs:
           Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
 
           $readme = @(
-            "ASURA'S WRATH - THESEUS T05.1",
+            "ASURA'S WRATH - THESEUS T06",
             "===========================",
             "",
             "Native Audio Policy validation build.",
