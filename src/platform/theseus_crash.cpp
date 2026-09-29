@@ -30,6 +30,7 @@ namespace {
 
 constexpr DWORD kTheseusTerminateException = 0xE0425409u;
 constexpr DWORD kTheseusAbortException = 0xE0425410u;
+constexpr DWORD kTheseusSelfTestException = 0xE0425499u;
 
 std::atomic<bool> g_installed{false};
 std::atomic<bool> g_crash_in_progress{false};
@@ -120,6 +121,8 @@ const char* ExceptionName(DWORD code) {
       return "THESEUS_STD_TERMINATE";
     case kTheseusAbortException:
       return "THESEUS_ABORT";
+    case kTheseusSelfTestException:
+      return "THESEUS_CRASH_SELF_TEST";
     default:
       return "UNKNOWN_EXCEPTION";
   }
@@ -431,6 +434,18 @@ void Install() {
   Breadcrumb("Theseus crash diagnostics installed");
   WritePeAudit();
 #endif
+}
+
+[[noreturn]] void TriggerSelfTestCrash() {
+#if defined(_WIN32)
+  Breadcrumb("CI self-test: intentional crash");
+  RaiseException(kTheseusSelfTestException, EXCEPTION_NONCONTINUABLE,
+                 0, nullptr);
+  TerminateProcess(GetCurrentProcess(), kTheseusSelfTestException);
+#else
+  std::abort();
+#endif
+  std::abort();
 }
 
 void Breadcrumb(std::string_view message) noexcept {
