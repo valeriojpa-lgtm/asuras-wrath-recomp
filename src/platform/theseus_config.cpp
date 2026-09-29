@@ -135,6 +135,8 @@ void ApplyValue(Config& c, std::string section, std::string key,
   else if (section == "keybinds" && key == "dpadright") string_value(c.keybinds.dpad_right);
   else if (section == "keybinds" && key == "back") string_value(c.keybinds.back);
   else if (section == "keybinds" && key == "start") string_value(c.keybinds.start);
+  else if ((section == "audio" || legacy) && key == "mute") bool_value(c.audio_mute);
+  else if ((section == "audio" || legacy) && key == "queuedframes") int_value(c.audio_queued_frames);
   else if ((section == "language" || legacy) && key == "language") int_value(c.language);
   else if ((section == "language" || legacy) && key == "country") int_value(c.country);
   else if ((section == "launcher" || legacy) && key == "showatstartup") bool_value(c.show_at_startup);
@@ -220,6 +222,9 @@ bool SaveConfig(const std::filesystem::path& path, const Config& c) {
       << "DPadRight=" << c.keybinds.dpad_right << "\n"
       << "Back=" << c.keybinds.back << "\n"
       << "Start=" << c.keybinds.start << "\n\n"
+      << "[Audio]\n"
+      << "Mute=" << (c.audio_mute ? 1 : 0) << "\n"
+      << "QueuedFrames=" << c.audio_queued_frames << "\n\n"
       << "[Language]\n"
       << "Language=" << c.language << "\n"
       << "Country=" << c.country << "\n\n"
