@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T08 Theseus dependency audit.
+"""T09 Theseus dependency audit.
 
 This intentionally audits only host-side source. Generated PPC guest code is
 not counted: it is the preserved game logic, not the platform boundary.
@@ -188,10 +188,31 @@ def main() -> int:
         else "FAIL"
     )
 
+    crash_header = read_text(repo / "src" / "platform" / "theseus_crash.h")
+    crash_source = read_text(repo / "src" / "platform" / "theseus_crash.cpp")
+    crash_markers = (
+        "T09 early crash diagnostics include",
+        "T09 install diagnostics before console launcher",
+        "T09 install diagnostics before Windows launcher",
+    )
+    missing_crash_markers = [
+        marker for marker in crash_markers if marker not in patch_script
+    ]
+    crash_boundary = (
+        "PASS"
+        if not missing_crash_markers
+        and "MiniDumpWriteDump" in crash_source
+        and "SetUnhandledExceptionFilter" in crash_source
+        and "TriggerSelfTestCrash" in crash_header
+        and "UserData" in crash_source
+        and "Crashes" in crash_source
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T08-native-threading-sync",
+        "Milestone: T09-exe-stability",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -211,7 +232,7 @@ def main() -> int:
         f"Native audio policy boundary: {audio_policy_boundary}",
         f"Audio compatibility bridge: {audio_bridge_boundary}",
         "",
-        "Native host facilities (T06):"
+        "Native host facilities (T09):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -220,6 +241,7 @@ def main() -> int:
         "  audio policy   : native",
         "  timing         : native",
         "  threading sync : native",
+        "  crash telemetry : native",
         "",
         "Runtime service backends:",
         "  filesystem : native host / rexglue guest-path bridge",
@@ -242,11 +264,13 @@ def main() -> int:
 
     lines += [
         "",
-        "T08 invariant:",
-        "  Host yield/sleep/TLS and synchronization waits are Theseus-owned.",
-        "  Host Event/Semaphore/Mutex/WaitableTimer operations are Theseus-owned.",
-        "  ReXGlue retains public rex::thread wrappers and Xbox kernel object ABI.",
-        "  XThread lifecycle, APC/DPC and guest scheduling semantics remain compatibility code.",
+        "T09 invariant:",
+        "  The Windows executable is expected to be x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
+        "  The Windows build uses the GUI subsystem; no console window is required.",
+        "  Process-wide crash diagnostics are installed before the native launcher.",
+        "  Unhandled failures produce portable text reports plus minidumps under UserData/Logs/Crashes.",
+        "  StabilitySession.txt records launcher/runtime/focus breadcrumbs leading up to a crash.",
+        "  T08 host synchronization remains native; XThread/APC/DPC guest semantics remain compatibility code.",
         "",
     ]
 
@@ -303,6 +327,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 8
+    if crash_boundary != "PASS":
+        print(
+            "ERROR: T09 crash diagnostics are incomplete.",
+            file=sys.stderr,
+        )
+        return 9
     return 0
 
 
