@@ -6,13 +6,15 @@
 #include "platform/theseus_graphics.h"
 #include "platform/theseus_input.h"
 #include "platform/theseus_presentation.h"
+#include "platform/theseus_render_resolution.h"
 
 namespace theseus {
 
 struct Config {
   int width = 1280;
   int height = 720;
-  int monitor = 0;  // 0 = system/default, 1..N = enumerated display.
+  int monitor = 0;  // 0 = automatic, 1..N = enumerated display.
+  int render_resolution = static_cast<int>(RenderResolutionPreset::kNative);
   bool fullscreen = true;
 
   [[nodiscard]] PresentationPolicyState MakePresentationPolicy() const {
