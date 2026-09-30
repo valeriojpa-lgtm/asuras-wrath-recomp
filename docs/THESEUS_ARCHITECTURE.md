@@ -688,3 +688,51 @@ translation, swapchain implementation or HUD/aspect-ratio behavior yet.
 Monitor selection is persisted by Theseus; the selected monitor ordinal is
 still passed to SDL as a compatibility bridge until the concrete window layer
 is replaced.
+
+
+## T11.2: Native Render Resolution
+
+T11.2 separates the physical output/window size from the guest render size.
+
+```
+Native display selection
+  |-- output/window resolution
+  v
+Theseus render preset
+  |-- 720p
+  |-- 1080p
+  |-- 1440p
+  |-- Native
+  |-- 4K
+  v
+aspect-preserving resolver
+  v
+video_mode_width / video_mode_height compatibility bridge
+  v
+Xbox guest video mode
+```
+
+The render presets use the selected output aspect ratio rather than forcing
+16:9 dimensions. For example, a 2560x1600 16:10 output resolves to:
+
+- 720p class: 1152x720
+- 1080p class: 1728x1080
+- 1440p class: 2304x1440
+- Native: 2560x1600
+- 4K class: 3456x2160
+
+The Xbox video-mode ABI clamps dimensions to 0x0FFF (4095). Theseus therefore
+fits very wide 4K-class modes inside that limit while preserving aspect ratio
+instead of allowing the compatibility layer to stretch or silently clamp only
+one dimension.
+
+Native is the default preset, preserving the validated T11.1 behavior.
+
+The monitor selector is intentionally concise:
+- Automática
+- Principal
+- Pantalla 2 / Pantalla 3 / ...
+
+The full native display identity remains inside NativeDisplayService for
+diagnostics and later monitor/refresh work; it is no longer used as the
+primary launcher label.
