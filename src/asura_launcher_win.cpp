@@ -35,6 +35,7 @@ constexpr wchar_t kLauncherTitle[] = L"Asura's Wrath - Settings";
 enum ControlId : int {
   kResolution = 1001,
   kMonitor,
+  kRenderResolution,
   kDisplayMode,
   kRenderer,
   kAdapter,
@@ -70,6 +71,10 @@ std::vector<ResolutionOption> FallbackResolutions() {
       {3840, 2160, L"3840 x 2160"},
   };
 }
+
+constexpr const wchar_t* kRenderResolutionLabels[] = {
+    L"720p", L"1080p", L"1440p", L"Nativa", L"4K",
+};
 
 struct LanguageOption {
   const wchar_t* label;
@@ -229,6 +234,7 @@ void RemoveCustomLauncherArgs(std::vector<std::string>& args) {
 void RemoveManagedArgs(std::vector<std::string>& args) {
   static constexpr std::string_view prefixes[] = {
       "--window_width=", "--window_height=", "--monitor=", "--fullscreen=",
+      "--video_mode_width=", "--video_mode_height=",
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--mnk_sensitivity=", "--theseus_hide_cursor_in_game=",
@@ -287,6 +293,14 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_int("window_height", presentation.height);
   add_int("monitor", presentation.monitor);
   add_bool("fullscreen", presentation.fullscreen);
+
+  // T11.2: keep output size and guest render size independent.
+  const auto render_preset = static_cast<theseus::RenderResolutionPreset>(
+      std::clamp(s.render_resolution, 0, 4));
+  const auto render_resolution = theseus::ResolveRenderResolution(
+      render_preset, presentation.width, presentation.height);
+  add_int("video_mode_width", render_resolution.width);
+  add_int("video_mode_height", render_resolution.height);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
   // adapter, VSync and shader-compilation choices. The arguments below are a
@@ -719,11 +733,13 @@ struct LauncherState {
   std::filesystem::path config_path;
   std::vector<AdapterOption> adapters;
   std::vector<ResolutionOption> resolutions;
+  std::vector<int> monitor_values;
   HFONT font = nullptr;
   bool accepted = false;
 
   HWND resolution = nullptr;
   HWND monitor = nullptr;
+  HWND render_resolution = nullptr;
   HWND display_mode = nullptr;
   HWND renderer = nullptr;
   HWND adapter = nullptr;
@@ -746,8 +762,19 @@ struct LauncherState {
   }
 
   int FindMonitorComboIndex(int configured_monitor) const {
-    const auto count = theseus::Platform::Instance().display().monitors().size();
-    return std::clamp(configured_monitor, 0, static_cast<int>(count));
+    for (size_t i = 0; i < monitor_values.size(); ++i) {
+      if (monitor_values[i] == configured_monitor) return static_cast<int>(i);
+    }
+    return 0;
+  }
+
+  int MonitorValueFromCombo() const {
+    const int selected =
+        static_cast<int>(SendMessageW(monitor, CB_GETCURSEL, 0, 0));
+    if (selected < 0 || selected >= static_cast<int>(monitor_values.size())) {
+      return 0;
+    }
+    return monitor_values[static_cast<size_t>(selected)];
   }
 
   void RebuildResolutionOptions(int monitor_selection,
@@ -867,19 +894,19 @@ struct LauncherState {
 
     CreateLabel(hwnd, font, L"Monitor", 478, 58, 70, 24);
     monitor = CreateCombo(hwnd, font, kMonitor, 548, 54, 185, 300);
+    monitor_values.clear();
+    monitor_values.push_back(0);
     SendMessageW(monitor, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"Auto / primary"));
+                 reinterpret_cast<LPARAM>(L"Automática"));
     const auto& monitors =
         theseus::Platform::Instance().display().monitors();
+    int secondary_number = 2;
     for (size_t i = 0; i < monitors.size(); ++i) {
       const auto& display = monitors[i];
-      std::wstring label = L"Display " + std::to_wstring(i + 1);
-      if (display.primary) {
-        label += L" (Primary)";
-      }
-      if (!display.display_name.empty()) {
-        label += L" - " + display.display_name;
-      }
+      const std::wstring label =
+          display.primary ? L"Principal"
+                          : L"Pantalla " + std::to_wstring(secondary_number++);
+      monitor_values.push_back(static_cast<int>(i + 1));
       SendMessageW(monitor, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(label.c_str()));
     }
@@ -887,11 +914,19 @@ struct LauncherState {
     RebuildResolutionOptions(settings.monitor, settings.width, settings.height);
 
     CreateLabel(hwnd, font, L"Display mode", 42, 96, 145, 24);
-    display_mode = CreateCombo(hwnd, font, kDisplayMode, 195, 92, 280, 120);
+    display_mode = CreateCombo(hwnd, font, kDisplayMode, 195, 92, 265, 120);
     SendMessageW(display_mode, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"Fullscreen"));
     SendMessageW(display_mode, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"Windowed"));
+
+    CreateLabel(hwnd, font, L"Render", 478, 96, 70, 24);
+    render_resolution =
+        CreateCombo(hwnd, font, kRenderResolution, 548, 92, 185, 150);
+    for (const auto* label : kRenderResolutionLabels) {
+      SendMessageW(render_resolution, CB_ADDSTRING, 0,
+                   reinterpret_cast<LPARAM>(label));
+    }
 
     CreateLabel(hwnd, font, L"Renderer", 42, 134, 145, 24);
     renderer = CreateCombo(hwnd, font, kRenderer, 195, 130, 280, 120);
@@ -960,6 +995,8 @@ struct LauncherState {
     SendMessageW(resolution, CB_SETCURSEL,
                  FindResolutionIndex(settings.width, settings.height), 0);
     SendMessageW(display_mode, CB_SETCURSEL, settings.fullscreen ? 0 : 1, 0);
+    SendMessageW(render_resolution, CB_SETCURSEL,
+                 std::clamp(settings.render_resolution, 0, 4), 0);
     SendMessageW(renderer, CB_SETCURSEL, std::clamp(settings.renderer, 0, 1), 0);
     SendMessageW(adapter, CB_SETCURSEL, FindAdapterComboIndex(settings.adapter), 0);
     SetCheck(vsync, settings.vsync);
@@ -984,9 +1021,10 @@ struct LauncherState {
     settings.width = resolutions[resolution_index].width;
     settings.height = resolutions[resolution_index].height;
 
-    settings.monitor =
-        std::max(0, static_cast<int>(
-                        SendMessageW(monitor, CB_GETCURSEL, 0, 0)));
+    settings.monitor = MonitorValueFromCombo();
+    settings.render_resolution = std::clamp(
+        static_cast<int>(SendMessageW(render_resolution, CB_GETCURSEL, 0, 0)),
+        0, 4);
     settings.fullscreen = SendMessageW(display_mode, CB_GETCURSEL, 0, 0) == 0;
     settings.renderer =
         std::clamp(static_cast<int>(SendMessageW(renderer, CB_GETCURSEL, 0, 0)), 0, 1);
@@ -1057,9 +1095,7 @@ LRESULT CALLBACK LauncherWndProc(HWND hwnd, UINT message,
       }
       if (HIWORD(wparam) == CBN_SELCHANGE &&
           LOWORD(wparam) == kMonitor) {
-        const int selected_monitor = std::max(
-            0, static_cast<int>(
-                   SendMessageW(state->monitor, CB_GETCURSEL, 0, 0)));
+        const int selected_monitor = state->MonitorValueFromCombo();
         state->RebuildResolutionOptions(
             selected_monitor, state->settings.width, state->settings.height);
         return 0;
