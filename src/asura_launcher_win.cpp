@@ -1305,6 +1305,8 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       std::string(theseus::RenderResolutionPresetName(
           static_cast<theseus::RenderResolutionPreset>(
               std::clamp(state.settings.render_resolution, 0, 2)))) +
+      " render_compat=" +
+      std::to_string(std::clamp(state.settings.render_compatibility, 0, 3)) +
       " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
       " vsync=" + (state.settings.vsync ? "1" : "0") +
       " async_shaders=" + (state.settings.async_shaders ? "1" : "0") +
