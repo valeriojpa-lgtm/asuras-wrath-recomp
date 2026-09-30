@@ -246,6 +246,7 @@ def main() -> int:
         repo / "src" / "platform" / "theseus_graphics.h"
     )
     config_header = read_text(repo / "src" / "platform" / "theseus_config.h")
+    config_source = read_text(repo / "src" / "platform" / "theseus_config.cpp")
     platform_source = read_text(repo / "src" / "platform" / "theseus_platform.cpp")
     cmake_source = read_text(repo / "CMakeLists.txt")
     graphics_policy_boundary = (
