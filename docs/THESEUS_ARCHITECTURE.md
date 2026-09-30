@@ -692,47 +692,46 @@ is replaced.
 
 ## T11.2: Native Render Resolution
 
-T11.2 separates the physical output/window size from the guest render size.
+T11.2 separates physical output resolution from the resolution at which the
+Xenos compatibility renderer actually draws.
+
+The first RUN used `video_mode_width/video_mode_height`. Runtime validation
+proved that this only changed the video mode advertised to the guest and did
+not increase the real render-target resolution. That path is no longer used
+for the internal-resolution selector.
+
+The corrected path uses ReXGlue/Xenos `resolution_scale`, which is consumed
+by the texture cache, render-target cache, EDRAM allocation, viewports,
+scissors and scaled resolves.
 
 ```
 Native display selection
-  |-- output/window resolution
-  v
-Theseus render preset
-  |-- 720p
-  |-- 1080p
-  |-- 1440p
-  |-- Native
-  |-- 4K
-  v
-aspect-preserving resolver
-  v
-video_mode_width / video_mode_height compatibility bridge
-  v
-Xbox guest video mode
+  |
+  +--> physical output/window resolution
+  |
+  +--> Theseus internal-resolution preset
+          |
+          +-- Original (720p) -> resolution_scale 1
+          +-- 1440p          -> resolution_scale 2
+          +-- 4K             -> resolution_scale 3
+                               |
+                               v
+                     Xenos render targets / EDRAM
+                               |
+                               v
+                         Presenter / output
 ```
 
-The render presets use the selected output aspect ratio rather than forcing
-16:9 dimensions. For example, a 2560x1600 16:10 output resolves to:
+The compatibility renderer currently scales draws by integer factors. A true
+1080p mode would require fractional 1.5x scaling, which the current EDRAM and
+scaled-resolve path does not support safely. It is intentionally not exposed
+as a fake preset.
 
-- 720p class: 1152x720
-- 1080p class: 1728x1080
-- 1440p class: 2304x1440
-- Native: 2560x1600
-- 4K class: 3456x2160
+The safe default is Original (720p), preserving the validated T11.1 image and
+stability behavior. 1440p and 4K are opt-in validation modes.
 
-The Xbox video-mode ABI clamps dimensions to 0x0FFF (4095). Theseus therefore
-fits very wide 4K-class modes inside that limit while preserving aspect ratio
-instead of allowing the compatibility layer to stretch or silently clamp only
-one dimension.
-
-Native is the default preset, preserving the validated T11.1 behavior.
-
-The monitor selector is intentionally concise:
+The monitor selector remains intentionally concise:
 - Automática
 - Principal
 - Pantalla 2 / Pantalla 3 / ...
 
-The full native display identity remains inside NativeDisplayService for
-diagnostics and later monitor/refresh work; it is no longer used as the
-primary launcher label.
