@@ -14,7 +14,7 @@ struct Config {
   int width = 1280;
   int height = 720;
   int monitor = 0;  // 0 = automatic, 1..N = enumerated display.
-  int render_resolution = static_cast<int>(RenderResolutionPreset::kNative);
+  int render_resolution = static_cast<int>(RenderResolutionPreset::kOriginal720p);
   bool fullscreen = true;
 
   [[nodiscard]] PresentationPolicyState MakePresentationPolicy() const {
