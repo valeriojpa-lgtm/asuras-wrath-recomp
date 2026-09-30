@@ -74,6 +74,14 @@ jobs:
               $launcher -notmatch 'platform\.display\(\)\.Enumerate\(\)') {
             throw "T11 launcher does not rebuild resolution choices from native display data."
           }
+          if ($launcher -notmatch '"--monitor="' ) {
+            throw "T11 runtime-child argument cleanup does not manage --monitor."
+          }
+          if ($launcher -notmatch '" language="' -or
+              $launcher -notmatch '" mnk="' -or
+              $launcher -notmatch '" input="') {
+            throw "T11 launch breadcrumb does not expose language/input propagation."
+          }
           if ($launcher -notmatch "1920, 1200" -or
               $launcher -notmatch "2560, 1600" -or
               $launcher -notmatch "3440, 1440") {
