@@ -346,10 +346,40 @@ def main() -> int:
         else "FAIL"
     )
 
+    render_resolution_header = read_text(
+        repo / "src" / "platform" / "theseus_render_resolution.h"
+    )
+    render_resolution_source = read_text(
+        repo / "src" / "platform" / "theseus_render_resolution.cpp"
+    )
+    render_resolution_boundary = (
+        "PASS"
+        if "enum class RenderResolutionPreset" in render_resolution_header
+        and "ResolveRenderResolution" in render_resolution_header
+        and "kGuestMaxDimension = 0x0FFF" in render_resolution_source
+        and "RenderResolutionPreset::kNative" in render_resolution_source
+        and "RenderResolutionPreset::k4K" in render_resolution_source
+        and 'add_int("video_mode_width", render_resolution.width)' in launcher_source
+        and 'add_int("video_mode_height", render_resolution.height)' in launcher_source
+        and '"--video_mode_width="' in launcher_source
+        and '"--video_mode_height="' in launcher_source
+        and 'L"720p"' in launcher_source
+        and 'L"1080p"' in launcher_source
+        and 'L"1440p"' in launcher_source
+        and 'L"Nativa"' in launcher_source
+        and 'L"4K"' in launcher_source
+        and 'L"Automática"' in launcher_source
+        and 'L"Principal"' in launcher_source
+        and 'L"Pantalla "' in launcher_source
+        and "RenderResolution=" in config_source
+        and "src/platform/theseus_render_resolution.cpp" in cmake_source
+        else "FAIL"
+    )
+
     lines = [
         "ASURA'S WRATH - THESEUS STATUS",
         "==============================",
-        "Milestone: T11-native-display-modes",
+        "Milestone: T11.2-native-render-resolution",
         "",
         "Portable contract:",
         "  Root/Data/Game/Content",
@@ -371,8 +401,9 @@ def main() -> int:
         f"Graphics backend compatibility bridge: {graphics_backend_bridge}",
         f"Native presentation boundary: {presentation_boundary}",
         f"Native display-mode discovery: {display_boundary}",
+        f"Native render-resolution policy: {render_resolution_boundary}",
         "",
-        "Native host facilities (T11):",
+        "Native host facilities (T11.2):",
         "  portable paths : native",
         "  config         : native",
         "  filesystem     : native",
@@ -382,6 +413,7 @@ def main() -> int:
         "  graphics policy : native",
         "  presentation boundary : native",
         "  display modes : native",
+        "  render resolution : native policy / guest video-mode bridge",
         "  timing         : native",
         "  threading sync : native",
         "  crash telemetry : native",
@@ -411,14 +443,16 @@ def main() -> int:
 
     lines += [
         "",
-        "T11 invariant:",
-        "  T10.4 remains the validated/frozen presentation lifecycle baseline.",
-        "  Theseus enumerates attached desktop displays and their modes through Win32.",
-        "  The launcher resolution list is generated from the selected native display.",
-        "  1920x1200 is preserved in the fallback set for 16:10 validation.",
-        "  Monitor selection is persisted by Theseus and bridged temporarily to SDL.",
-        "  Runtime-child argument rebuilding removes the prior monitor override before re-appending settings.",
-        "  Stability breadcrumbs expose renderer/adapter/display/language/input selections for validation.",
+        "T11.2 invariant:",
+        "  T11.1 remains the validated/frozen native display-mode baseline.",
+        "  Output/window resolution and guest render resolution are separate policies.",
+        "  Render presets are limited to 720p, 1080p, 1440p, Native and 4K.",
+        "  Render width follows the selected output aspect ratio.",
+        "  The Xbox video-mode ABI limit of 4095 pixels is enforced without stretching ultrawide.",
+        "  Native is the default preset and preserves the validated T11.1 behavior.",
+        "  Monitor labels are compact: Automatic, Primary and Screen N while native identity is retained internally.",
+        "  Runtime-child argument rebuilding removes prior monitor and video-mode overrides before re-appending settings.",
+        "  Stability breadcrumbs expose output and resolved render selections for validation.",
         "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
         "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
@@ -524,6 +558,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 15
+    if render_resolution_boundary != "PASS":
+        print(
+            "ERROR: T11.2 native render-resolution policy is incomplete.",
+            file=sys.stderr,
+        )
+        return 16
     return 0
 
 
