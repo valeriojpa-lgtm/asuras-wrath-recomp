@@ -36,7 +36,6 @@ enum ControlId : int {
   kResolution = 1001,
   kMonitor,
   kRenderResolution,
-  kRenderCompatibility,
   kDisplayMode,
   kRenderer,
   kAdapter,
@@ -77,13 +76,6 @@ constexpr const wchar_t* kRenderResolutionLabels[] = {
     L"Original (720p)",
     L"1440p",
     L"4K",
-};
-
-constexpr const wchar_t* kRenderCompatibilityLabels[] = {
-    L"Normal",
-    L"Perfil A",
-    L"Perfil B",
-    L"Perfil C",
 };
 
 struct LanguageOption {
@@ -245,8 +237,6 @@ void RemoveManagedArgs(std::vector<std::string>& args) {
   static constexpr std::string_view prefixes[] = {
       "--window_width=", "--window_height=", "--monitor=", "--fullscreen=",
       "--resolution_scale=",
-      "--resolve_resolution_scale_fill_half_pixel_offset=",
-      "--draw_resolution_scaled_texture_offsets=",
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--mnk_sensitivity=", "--theseus_hide_cursor_in_game=",
@@ -314,16 +304,6 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   const auto render_resolution =
       theseus::ResolveRenderResolution(render_preset);
   add_int("resolution_scale", render_resolution.scale);
-
-  // T11.2 diagnostic compatibility profiles for scaled render-to-texture
-  // paths. These map to existing ReXGlue renderer controls and are temporary
-  // until Asura's Wrath's high-resolution postprocess incompatibility is
-  // isolated.
-  const int render_compatibility = std::clamp(s.render_compatibility, 0, 3);
-  add_bool("resolve_resolution_scale_fill_half_pixel_offset",
-           render_compatibility != 1 && render_compatibility != 3);
-  add_bool("draw_resolution_scaled_texture_offsets",
-           render_compatibility != 2 && render_compatibility != 3);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
   // adapter, VSync and shader-compilation choices. The arguments below are a
@@ -763,7 +743,6 @@ struct LauncherState {
   HWND resolution = nullptr;
   HWND monitor = nullptr;
   HWND render_resolution = nullptr;
-  HWND render_compatibility = nullptr;
   HWND display_mode = nullptr;
   HWND renderer = nullptr;
   HWND adapter = nullptr;
@@ -976,16 +955,9 @@ struct LauncherState {
     }
 
     CreateLabel(hwnd, font, L"GRAPHICS", 28, 218, 180, 22);
-    vsync = CreateCheck(hwnd, font, kVsync, L"VSync", 42, 250, 120, 26);
+    vsync = CreateCheck(hwnd, font, kVsync, L"VSync", 42, 250, 180, 26);
     async_shaders = CreateCheck(hwnd, font, kAsyncShaders,
-                                L"Async shaders", 170, 250, 150, 26);
-    CreateLabel(hwnd, font, L"Compat. escalado", 330, 252, 120, 24);
-    render_compatibility =
-        CreateCombo(hwnd, font, kRenderCompatibility, 455, 246, 210, 150);
-    for (const auto* label : kRenderCompatibilityLabels) {
-      SendMessageW(render_compatibility, CB_ADDSTRING, 0,
-                   reinterpret_cast<LPARAM>(label));
-    }
+                                L"Async shader compilation", 250, 250, 250, 26);
 
     CreateLabel(hwnd, font, L"INPUT", 28, 298, 180, 22);
     mnk = CreateCheck(hwnd, font, kMnk, L"Keyboard / mouse controls",
@@ -1031,8 +1003,6 @@ struct LauncherState {
     SendMessageW(display_mode, CB_SETCURSEL, settings.fullscreen ? 0 : 1, 0);
     SendMessageW(render_resolution, CB_SETCURSEL,
                  std::clamp(settings.render_resolution, 0, 2), 0);
-    SendMessageW(render_compatibility, CB_SETCURSEL,
-                 std::clamp(settings.render_compatibility, 0, 3), 0);
     SendMessageW(renderer, CB_SETCURSEL, std::clamp(settings.renderer, 0, 1), 0);
     SendMessageW(adapter, CB_SETCURSEL, FindAdapterComboIndex(settings.adapter), 0);
     SetCheck(vsync, settings.vsync);
@@ -1061,10 +1031,6 @@ struct LauncherState {
     settings.render_resolution = std::clamp(
         static_cast<int>(SendMessageW(render_resolution, CB_GETCURSEL, 0, 0)),
         0, 2);
-    settings.render_compatibility = std::clamp(
-        static_cast<int>(
-            SendMessageW(render_compatibility, CB_GETCURSEL, 0, 0)),
-        0, 3);
     settings.fullscreen = SendMessageW(display_mode, CB_GETCURSEL, 0, 0) == 0;
     settings.renderer =
         std::clamp(static_cast<int>(SendMessageW(renderer, CB_GETCURSEL, 0, 0)), 0, 1);
@@ -1305,8 +1271,6 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       std::string(theseus::RenderResolutionPresetName(
           static_cast<theseus::RenderResolutionPreset>(
               std::clamp(state.settings.render_resolution, 0, 2)))) +
-      " render_compat=" +
-      std::to_string(std::clamp(state.settings.render_compatibility, 0, 3)) +
       " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
       " vsync=" + (state.settings.vsync ? "1" : "0") +
       " async_shaders=" + (state.settings.async_shaders ? "1" : "0") +
