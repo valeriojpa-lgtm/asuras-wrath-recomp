@@ -356,23 +356,24 @@ def main() -> int:
     render_resolution_boundary = (
         "PASS"
         if "enum class RenderResolutionPreset" in render_resolution_header
+        and "RenderResolutionPolicy" in render_resolution_header
         and "ResolveRenderResolution" in render_resolution_header
-        and "kGuestMaxDimension = 0x0FFF" in render_resolution_source
-        and "RenderResolutionPreset::kNative" in render_resolution_source
+        and "RenderResolutionPreset::kOriginal720p" in render_resolution_source
+        and "RenderResolutionPreset::k1440p" in render_resolution_source
         and "RenderResolutionPreset::k4K" in render_resolution_source
-        and 'add_int("video_mode_width", render_resolution.width)' in launcher_source
-        and 'add_int("video_mode_height", render_resolution.height)' in launcher_source
-        and '"--video_mode_width="' in launcher_source
-        and '"--video_mode_height="' in launcher_source
-        and 'L"720p"' in launcher_source
-        and 'L"1080p"' in launcher_source
+        and 'add_int("resolution_scale", render_resolution.scale)' in launcher_source
+        and '"--resolution_scale="' in launcher_source
+        and '"--video_mode_width="' not in launcher_source
+        and '"--video_mode_height="' not in launcher_source
+        and 'L"Original (720p)"' in launcher_source
         and 'L"1440p"' in launcher_source
-        and 'L"Nativa"' in launcher_source
         and 'L"4K"' in launcher_source
+        and 'L"1080p"' not in launcher_source
+        and 'L"Nativa"' not in launcher_source
         and 'L"Automática"' in launcher_source
         and 'L"Principal"' in launcher_source
         and 'L"Pantalla "' in launcher_source
-        and "RenderResolution=" in config_source
+        and "RenderScalePreset=" in config_source
         and "src/platform/theseus_render_resolution.cpp" in cmake_source
         else "FAIL"
     )
@@ -447,10 +448,10 @@ def main() -> int:
         "T11.2 invariant:",
         "  T11.1 remains the validated/frozen native display-mode baseline.",
         "  Output/window resolution and guest render resolution are separate policies.",
-        "  Render presets are limited to 720p, 1080p, 1440p, Native and 4K.",
-        "  Render width follows the selected output aspect ratio.",
-        "  The Xbox video-mode ABI limit of 4095 pixels is enforced without stretching ultrawide.",
-        "  Native is the default preset and preserves the validated T11.1 behavior.",
+        "  True renderer presets are limited to Original (720p), 1440p and 4K.",
+        "  They map to ReXGlue/Xenos resolution_scale 1, 2 and 3 respectively.",
+        "  Advertised Xbox video mode is no longer used as a proxy for internal resolution.",
+        "  Original (720p) is the safe default and preserves the validated T11.1 behavior.",
         "  Monitor labels are compact: Automatic, Primary and Screen N while native identity is retained internally.",
         "  Runtime-child argument rebuilding removes prior monitor and video-mode overrides before re-appending settings.",
         "  Stability breadcrumbs expose output and resolved render selections for validation.",
