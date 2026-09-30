@@ -1,9 +1,6 @@
 name: THESEUS T11.2 - Postprocess Patch Map
 
 on:
-  push:
-    branches:
-      - theseus/t11-2-native-render-resolution
   workflow_dispatch:
 
 jobs:
