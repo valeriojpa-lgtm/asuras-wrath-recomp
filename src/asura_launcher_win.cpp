@@ -226,6 +226,19 @@ bool HasArg(const std::vector<std::string>& args, std::string_view wanted) {
   });
 }
 
+int PostFxDiagnosticMaskFromEnvironment() {
+  const char* value = std::getenv("THESEUS_POSTFX_MASK");
+  if (!value || !*value) {
+    return -1;
+  }
+  char* end = nullptr;
+  const long parsed = std::strtol(value, &end, 0);
+  if (end == value) {
+    return -1;
+  }
+  return static_cast<int>(parsed) & 0x1F;
+}
+
 void RemoveCustomLauncherArgs(std::vector<std::string>& args) {
   std::erase_if(args, [](const std::string& arg) {
     return arg == "--launcher" || arg == "--no_launcher" ||
@@ -303,7 +316,12 @@ void AppendSettingsArgs(std::vector<std::string>& args,
       std::clamp(s.render_resolution, 0, 2));
   const auto render_resolution =
       theseus::ResolveRenderResolution(render_preset);
-  add_int("resolution_scale", render_resolution.scale);
+  const int postfx_diag_mask = PostFxDiagnosticMaskFromEnvironment();
+  // The one-click PostFX diagnostic always exercises the known-bad high-
+  // resolution path at 2x so the user never has to reconfigure the launcher
+  // between trials.
+  add_int("resolution_scale",
+          postfx_diag_mask >= 0 ? 2 : render_resolution.scale);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
   // adapter, VSync and shader-compilation choices. The arguments below are a
@@ -1282,10 +1300,21 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
   const auto resolved_render = theseus::ResolveRenderResolution(
       static_cast<theseus::RenderResolutionPreset>(
           std::clamp(state.settings.render_resolution, 0, 2)));
-  stability += " render_scale=" + std::to_string(resolved_render.scale) +
+  const int postfx_diag_mask = PostFxDiagnosticMaskFromEnvironment();
+  const int effective_render_scale =
+      postfx_diag_mask >= 0 ? 2 : resolved_render.scale;
+  stability += " render_scale=" + std::to_string(effective_render_scale) +
                " render_reference=" +
-               std::to_string(resolved_render.reference_width) + "x" +
-               std::to_string(resolved_render.reference_height);
+               std::to_string(postfx_diag_mask >= 0
+                                  ? 2560
+                                  : resolved_render.reference_width) +
+               "x" +
+               std::to_string(postfx_diag_mask >= 0
+                                  ? 1440
+                                  : resolved_render.reference_height);
+  if (postfx_diag_mask >= 0) {
+    stability += " postfx_diag_mask=" + std::to_string(postfx_diag_mask);
+  }
   theseus::crash::Breadcrumb(stability);
 
   if (!runtime_child) {
