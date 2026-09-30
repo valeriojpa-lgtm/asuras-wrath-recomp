@@ -100,6 +100,7 @@ list(APPEND ASURAWRATH_SOURCES
   src/compat/rexglue_filesystem_bridge.cpp
   src/compat/rexglue_graphics_bridge.cpp
   src/compat/rexglue_presentation_bridge.cpp
+  src/compat/theseus_postfx_diag.cpp
 )
 
 if(WIN32 AND NOT ANDROID)
