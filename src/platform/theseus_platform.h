@@ -18,7 +18,7 @@
 
 namespace theseus {
 
-inline constexpr std::string_view kMilestone = "T11-native-display-modes";
+inline constexpr std::string_view kMilestone = "T11.2-native-render-resolution";
 
 enum class Backend {
   kReXGlue,
