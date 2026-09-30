@@ -103,6 +103,7 @@ void ApplyValue(Config& c, std::string section, std::string key,
   else if ((section == "display" || legacy) && key == "height") int_value(c.height);
   else if ((section == "display" || legacy) && key == "monitor") int_value(c.monitor);
   else if ((section == "display" || legacy) && key == "renderscalepreset") int_value(c.render_resolution);
+  else if ((section == "display" || legacy) && key == "rendercompatibility") int_value(c.render_compatibility);
   else if ((section == "display" || legacy) && key == "renderresolution") {
     int legacy_render_resolution = 0;
     int_value(legacy_render_resolution);
@@ -201,6 +202,7 @@ bool SaveConfig(const std::filesystem::path& path, const Config& c) {
       << "Height=" << c.height << "\n"
       << "Monitor=" << c.monitor << "\n"
       << "RenderScalePreset=" << c.render_resolution << "\n"
+      << "RenderCompatibility=" << c.render_compatibility << "\n"
       << "Fullscreen=" << (c.fullscreen ? 1 : 0) << "\n"
       << "VSync=" << (c.vsync ? 1 : 0) << "\n\n"
       << "[Graphics]\n"
