@@ -1,0 +1,247 @@
+name: THESEUS T11.2 - Native Render Resolution
+
+on:
+  push:
+    branches:
+      - theseus/t11-2-native-render-resolution
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build portable T11.2 render-resolution candidate
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ephemeral build toolchain
+        shell: powershell
+        run: |
+          choco install llvm cmake ninja -y --no-progress
+
+      - name: Apply preserved ReXGlue patches plus T09.3 stability fix
+        shell: cmd
+        run: |
+          python tools\apply_win_startup_fix.py
+
+      - name: Audit Theseus boundary
+        shell: cmd
+        run: |
+          python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Prove T11.2 render-resolution policy
+        shell: powershell
+        run: |
+          $status = Get-Content "out/theseus/THESEUS_STATUS.txt" -Raw
+          $header = Get-Content "src/platform/theseus_render_resolution.h" -Raw
+          $source = Get-Content "src/platform/theseus_render_resolution.cpp" -Raw
+          $launcher = Get-Content "src/asura_launcher_win.cpp" -Raw
+          $config = Get-Content "src/platform/theseus_config.cpp" -Raw
+
+          if ($status -notmatch "Milestone: T11.2-native-render-resolution") {
+            throw "T11.2 audit did not publish the expected milestone."
+          }
+          if ($status -notmatch "Native render-resolution policy: PASS") {
+            throw "T11.2 audit did not validate render-resolution separation."
+          }
+          foreach ($needle in @("k720p","k1080p","k1440p","kNative","k4K")) {
+            if ($header -notmatch $needle) {
+              throw "T11.2 render preset missing: $needle"
+            }
+          }
+          if ($launcher -notmatch 'video_mode_width' -or
+              $launcher -notmatch 'video_mode_height') {
+            throw "T11.2 launcher does not bridge guest render dimensions."
+          }
+          foreach ($label in @("720p","1080p","1440p","Nativa","4K","Automática","Principal")) {
+            if ($launcher -notmatch [regex]::Escape($label)) {
+              throw "T11.2 launcher label missing: $label"
+            }
+          }
+          if ($source -notmatch "0x0FFF") {
+            throw "T11.2 does not enforce the Xbox video-mode ABI dimension limit."
+          }
+          if ($config -notmatch "RenderResolution=") {
+            throw "T11.2 render preset is not persisted."
+          }
+
+      - name: Test T11.2 aspect-preserving presets
+        shell: powershell
+        run: |
+          @'
+          #include <cassert>
+          #include "platform/theseus_render_resolution.h"
+          int main() {
+            using namespace theseus;
+            auto r720 = ResolveRenderResolution(RenderResolutionPreset::k720p, 2560, 1600);
+            assert(r720.width == 1152 && r720.height == 720 && !r720.capped);
+            auto r1080 = ResolveRenderResolution(RenderResolutionPreset::k1080p, 2560, 1600);
+            assert(r1080.width == 1728 && r1080.height == 1080 && !r1080.capped);
+            auto r1440 = ResolveRenderResolution(RenderResolutionPreset::k1440p, 2560, 1600);
+            assert(r1440.width == 2304 && r1440.height == 1440 && !r1440.capped);
+            auto native = ResolveRenderResolution(RenderResolutionPreset::kNative, 2560, 1600);
+            assert(native.width == 2560 && native.height == 1600 && !native.capped);
+            auto r4k = ResolveRenderResolution(RenderResolutionPreset::k4K, 2560, 1600);
+            assert(r4k.width == 3456 && r4k.height == 2160 && !r4k.capped);
+            auto ultra4k = ResolveRenderResolution(RenderResolutionPreset::k4K, 3440, 1440);
+            assert(ultra4k.width <= 4095 && ultra4k.height <= 4095 && ultra4k.capped);
+            return 0;
+          }
+          '@ | Set-Content -Encoding UTF8 out/render_resolution_test.cpp
+          clang++ -std=c++23 -Isrc out/render_resolution_test.cpp src/platform/theseus_render_resolution.cpp -o out/render_resolution_test.exe
+          if ($LASTEXITCODE -ne 0) { throw "T11.2 render-resolution test failed to compile." }
+          & out/render_resolution_test.exe
+          if ($LASTEXITCODE -ne 0) { throw "T11.2 render-resolution assertions failed." }
+
+      - name: Show tool versions
+        shell: cmd
+        run: |
+          git --version
+          cmake --version
+          clang --version
+          ninja --version
+
+      - name: Build T11.2 native release
+        shell: cmd
+        run: |
+          cmake --preset win-amd64-release -DASURA_SKIP_CODEGEN=ON -DREXGLUE_USE_VULKAN=ON -DREXGLUE_USE_D3D12=ON
+          if errorlevel 1 exit /b %errorlevel%
+          cmake --build out/build/win-amd64-release --target asura_wrath_recomp --parallel
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Audit built PE
+        shell: cmd
+        run: |
+          python tools\theseus_pe_audit.py "out/build/win-amd64-release/Asura's Wrath.exe" --out out/theseus/THESEUS_PE_STATUS.txt
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Crash diagnostics self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_crash_test","--no_launcher" -PassThru -Wait
+          Write-Host "Intentional crash exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $session = Join-Path $userData "Logs/StabilitySession.txt"
+          $reports = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.txt" -ErrorAction SilentlyContinue)
+          $dumps = @(Get-ChildItem $crashDir -Filter "TheseusCrash_*.dmp" -ErrorAction SilentlyContinue)
+
+          if ($reports.Count -lt 1) { throw "T11 self-test did not create a crash text report." }
+          if ($dumps.Count -lt 1) { throw "T11 self-test did not create a minidump." }
+          if ($dumps[0].Length -lt 4096) { throw "T10 minidump is unexpectedly small." }
+          if (!(Test-Path $session)) { throw "T11 stability breadcrumb log was not created." }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Hard-exit guard self-test
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $exe = Join-Path $build "Asura's Wrath.exe"
+          $userData = Join-Path $build "UserData"
+          if (Test-Path $userData) { Remove-Item -Recurse -Force $userData }
+
+          $process = Start-Process -FilePath $exe -ArgumentList "--theseus_hard_exit_test","--no_launcher" -PassThru -Wait
+          Write-Host "Guard parent exit code: $($process.ExitCode)"
+
+          $crashDir = Join-Path $userData "Logs/Crashes"
+          $hardReports = @(Get-ChildItem $crashDir -Filter "TheseusHardExit_*.txt" -ErrorAction SilentlyContinue)
+          if ($hardReports.Count -lt 1) { throw "T11 guard did not create a hard-exit report." }
+
+          $hardText = Get-Content $hardReports[0].FullName -Raw
+          if ($hardText -notmatch "THESEUS_HARD_EXIT_SELF_TEST") {
+            throw "T10 hard-exit report did not preserve the self-test classification."
+          }
+          if ($hardText -notmatch "Milestone: T11.2-native-render-resolution") {
+            throw "T11.2 hard-exit report still carries a stale milestone label."
+          }
+
+          Remove-Item -Recurse -Force $userData
+
+      - name: Package portable T11.2 render resolution
+        shell: powershell
+        run: |
+          $build = Resolve-Path "out/build/win-amd64-release"
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item (Join-Path $build "Asura's Wrath.exe") $dist
+          Get-ChildItem $build -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+          Get-ChildItem "tools/rexglue/out/win-amd64" -Filter *.dll -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $dist
+
+          Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
+          Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
+          Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+
+          $readme = @(
+            "ASURA'S WRATH - THESEUS T11.2 NATIVE RENDER RESOLUTION",
+            "======================================================",
+            "",
+            "T11.2 native render-resolution candidate.",
+            "",
+            "Base: validated/frozen T11.1 native display modes.",
+            "Theseus now separates physical output resolution from guest render resolution.",
+            "Render presets: 720p / 1080p / 1440p / Nativa / 4K.",
+            "Monitor labels are compact: Automática / Principal / Pantalla N.",
+            "",
+            "SDL Window/monitor application, D3D12/Vulkan Presenter, swapchain, Xenos command processor and shader translator remain compatibility-backed.",
+            "",
+            "Place this folder next to your existing Data folder and launch Asura's Wrath.exe normally.",
+            "",
+            "Validation:",
+            "  1. Confirm monitor labels are concise.",
+            "  2. Use 2560x1600 output with Nativa first; behavior should match T11.1.",
+            "  3. Then test 1080p and 1440p internal rendering while keeping 2560x1600 output.",
+            "  4. Confirm menu + gameplay + controls + language + repeated Alt-Tab + clean exit.",
+            "  5. Preserve the frozen T11.1 baseline.",
+            "",
+            "Preserve UserData\Logs if any unexpected exit occurs."
+          )
+          Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
+
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+
+      - name: Verify package
+        shell: powershell
+        run: |
+          Get-Content "out/theseus/THESEUS_STATUS.txt"
+          Get-Content "out/theseus/THESEUS_PE_STATUS.txt"
+
+          $dist = "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION"
+          $forbidden = @(Get-ChildItem $dist -Recurse -File | Where-Object {
+            $_.Name -match "asan|llvm-symbolizer|heap_probe"
+          })
+          if ($forbidden.Count -gt 0) {
+            throw "T11.2 package contains forbidden diagnostic files: $($forbidden.Name -join ', ')"
+          }
+
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip"
+          Write-Host "Portable package: $($zip.FullName)"
+          Write-Host "Size: $($zip.Length) bytes"
+
+      - name: Upload portable T11.2 render resolution
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE
+          path: out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip
+          if-no-files-found: error
+          retention-days: 30
