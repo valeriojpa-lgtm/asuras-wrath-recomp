@@ -32,6 +32,24 @@ jobs:
         run: |
           python tools\apply_win_startup_fix.py
 
+      - name: Apply Asura postprocess scaling diagnostic
+        shell: cmd
+        run: |
+          python tools\apply_asura_resolution_postprocess_fix.py --report-only
+          if errorlevel 1 exit /b %errorlevel%
+          python tools\apply_asura_resolution_postprocess_fix.py
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Prove Asura postprocess scaling diagnostic
+        shell: powershell
+        run: |
+          $hits = Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp" |
+            Select-String -Pattern "THESEUS T11.2 diagnostic @"
+          if ($hits.Count -ne 5) {
+            throw "Expected 5 Asura postprocess diagnostic replacements, found $($hits.Count)."
+          }
+          $hits | ForEach-Object { Write-Host $_.Line }
+
       - name: Audit Theseus boundary
         shell: cmd
         run: |
@@ -200,11 +218,13 @@ jobs:
             "ASURA'S WRATH - THESEUS T11.2 NATIVE RENDER RESOLUTION",
             "======================================================",
             "",
-            "T11.2 native render-resolution candidate.",
+            "T11.2 postprocess diagnostic candidate.",
             "",
             "Base: validated/frozen T11.1 native display modes.",
             "Theseus now separates physical output resolution from guest render resolution.",
             "True render presets: Original (720p) / 1440p / 4K.",
+            "DIAGNOSTIC: exact Asura resolution-scaling postprocess bypass is compiled in.",
+            "This build intentionally changes/disables postprocessing to confirm the green-corruption cause.",
             "Monitor labels are compact: Automática / Principal / Pantalla N.",
             "",
             "SDL Window/monitor application, D3D12/Vulkan Presenter, swapchain, Xenos command processor and shader translator remain compatibility-backed.",
@@ -213,8 +233,8 @@ jobs:
             "",
             "Validation:",
             "  1. Confirm monitor labels are concise.",
-            "  2. Use 2560x1600 output with Original (720p) first; behavior should match T11.1.",
-            "  3. Then test 1440p and 4K internal rendering while keeping 2560x1600 output.",
+            "  2. Set internal rendering to 1440p.",
+            "  3. Check whether the green/black corruption disappears at the title screen/gameplay.",
             "  4. Confirm menu + gameplay + controls + language + repeated Alt-Tab + clean exit.",
             "  5. Preserve the frozen T11.1 baseline.",
             "",
@@ -222,7 +242,7 @@ jobs:
           )
           Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
 
-          $zip = "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip"
+          $zip = "out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip"
           if (Test-Path $zip) { Remove-Item -Force $zip }
           Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
 
@@ -240,14 +260,14 @@ jobs:
             throw "T11.2 package contains forbidden diagnostic files: $($forbidden.Name -join ', ')"
           }
 
-          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip"
+          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip"
           Write-Host "Portable package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
       - name: Upload portable T11.2 render resolution
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE
-          path: out/dist/ASURAS_WRATH_THESEUS_T11_2_RENDER_RESOLUTION_PORTABLE.zip
+          name: ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG
+          path: out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip
           if-no-files-found: error
           retention-days: 30
