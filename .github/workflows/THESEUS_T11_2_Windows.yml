@@ -38,7 +38,7 @@ jobs:
           python tools\theseus_audit.py --out out/theseus/THESEUS_STATUS.txt
           if errorlevel 1 exit /b %errorlevel%
 
-      - name: Prove T11.2 render-resolution policy
+      - name: Prove T11.2 true renderer scaling
         shell: powershell
         run: |
           $status = Get-Content "out/theseus/THESEUS_STATUS.txt" -Raw
@@ -46,35 +46,44 @@ jobs:
           $source = Get-Content "src/platform/theseus_render_resolution.cpp" -Raw
           $launcher = Get-Content "src/asura_launcher_win.cpp" -Raw
           $config = Get-Content "src/platform/theseus_config.cpp" -Raw
+          $rexScale = Get-Content "tools/rexglue/src/graphics/pipeline/texture/cache.cpp" -Raw
 
           if ($status -notmatch "Milestone: T11.2-native-render-resolution") {
             throw "T11.2 audit did not publish the expected milestone."
           }
           if ($status -notmatch "Native render-resolution policy: PASS") {
-            throw "T11.2 audit did not validate render-resolution separation."
+            throw "T11.2 audit did not validate renderer scaling."
           }
-          foreach ($needle in @("k720p","k1080p","k1440p","kNative","k4K")) {
+          foreach ($needle in @("kOriginal720p","k1440p","k4K")) {
             if ($header -notmatch $needle) {
-              throw "T11.2 render preset missing: $needle"
+              throw "T11.2 true render preset missing: $needle"
             }
           }
-          if ($launcher -notmatch 'video_mode_width' -or
-              $launcher -notmatch 'video_mode_height') {
-            throw "T11.2 launcher does not bridge guest render dimensions."
+          if ($launcher -notmatch 'add_int\("resolution_scale", render_resolution\.scale\)' -or
+              $launcher -notmatch '"--resolution_scale="') {
+            throw "T11.2 launcher does not bridge the true renderer resolution scale."
           }
-          foreach ($label in @("720p","1080p","1440p","Nativa","4K","Automática","Principal")) {
+          if ($launcher -match '"--video_mode_width="' -or
+              $launcher -match '"--video_mode_height="') {
+            throw "T11.2 still treats advertised Xbox video mode as internal render resolution."
+          }
+          foreach ($label in @("Original (720p)","1440p","4K","Automática","Principal")) {
             if ($launcher -notmatch [regex]::Escape($label)) {
               throw "T11.2 launcher label missing: $label"
             }
           }
-          if ($source -notmatch "0x0FFF") {
-            throw "T11.2 does not enforce the Xbox video-mode ABI dimension limit."
+          if ($launcher -match 'L"1080p"' -or $launcher -match 'L"Nativa"') {
+            throw "T11.2 exposes a fractional/non-real render preset."
           }
-          if ($config -notmatch "RenderResolution=") {
-            throw "T11.2 render preset is not persisted."
+          if ($config -notmatch "RenderScalePreset=") {
+            throw "T11.2 true scale preset is not persisted."
+          }
+          if ($rexScale -notmatch "REXCVAR_DEFINE_INT32\(resolution_scale, 1" -or
+              $rexScale -notmatch "GetConfigDrawResolutionScale") {
+            throw "Pinned ReXGlue does not expose the expected true render scaling path."
           }
 
-      - name: Test T11.2 aspect-preserving presets
+      - name: Test T11.2 true renderer presets
         shell: powershell
         run: |
           @'
@@ -82,25 +91,22 @@ jobs:
           #include "platform/theseus_render_resolution.h"
           int main() {
             using namespace theseus;
-            auto r720 = ResolveRenderResolution(RenderResolutionPreset::k720p, 2560, 1600);
-            assert(r720.width == 1152 && r720.height == 720 && !r720.capped);
-            auto r1080 = ResolveRenderResolution(RenderResolutionPreset::k1080p, 2560, 1600);
-            assert(r1080.width == 1728 && r1080.height == 1080 && !r1080.capped);
-            auto r1440 = ResolveRenderResolution(RenderResolutionPreset::k1440p, 2560, 1600);
-            assert(r1440.width == 2304 && r1440.height == 1440 && !r1440.capped);
-            auto native = ResolveRenderResolution(RenderResolutionPreset::kNative, 2560, 1600);
-            assert(native.width == 2560 && native.height == 1600 && !native.capped);
-            auto r4k = ResolveRenderResolution(RenderResolutionPreset::k4K, 2560, 1600);
-            assert(r4k.width == 3456 && r4k.height == 2160 && !r4k.capped);
-            auto ultra4k = ResolveRenderResolution(RenderResolutionPreset::k4K, 3440, 1440);
-            assert(ultra4k.width <= 4095 && ultra4k.height <= 4095 && ultra4k.capped);
+            auto original = ResolveRenderResolution(RenderResolutionPreset::kOriginal720p);
+            assert(original.scale == 1);
+            assert(original.reference_width == 1280 && original.reference_height == 720);
+            auto r1440 = ResolveRenderResolution(RenderResolutionPreset::k1440p);
+            assert(r1440.scale == 2);
+            assert(r1440.reference_width == 2560 && r1440.reference_height == 1440);
+            auto r4k = ResolveRenderResolution(RenderResolutionPreset::k4K);
+            assert(r4k.scale == 3);
+            assert(r4k.reference_width == 3840 && r4k.reference_height == 2160);
             return 0;
           }
           '@ | Set-Content -Encoding UTF8 out/render_resolution_test.cpp
           clang++ -std=c++23 -Isrc out/render_resolution_test.cpp src/platform/theseus_render_resolution.cpp -o out/render_resolution_test.exe
-          if ($LASTEXITCODE -ne 0) { throw "T11.2 render-resolution test failed to compile." }
+          if ($LASTEXITCODE -ne 0) { throw "T11.2 renderer-scale test failed to compile." }
           & out/render_resolution_test.exe
-          if ($LASTEXITCODE -ne 0) { throw "T11.2 render-resolution assertions failed." }
+          if ($LASTEXITCODE -ne 0) { throw "T11.2 renderer-scale assertions failed." }
 
       - name: Show tool versions
         shell: cmd
@@ -198,7 +204,7 @@ jobs:
             "",
             "Base: validated/frozen T11.1 native display modes.",
             "Theseus now separates physical output resolution from guest render resolution.",
-            "Render presets: 720p / 1080p / 1440p / Nativa / 4K.",
+            "True render presets: Original (720p) / 1440p / 4K.",
             "Monitor labels are compact: Automática / Principal / Pantalla N.",
             "",
             "SDL Window/monitor application, D3D12/Vulkan Presenter, swapchain, Xenos command processor and shader translator remain compatibility-backed.",
@@ -207,8 +213,8 @@ jobs:
             "",
             "Validation:",
             "  1. Confirm monitor labels are concise.",
-            "  2. Use 2560x1600 output with Nativa first; behavior should match T11.1.",
-            "  3. Then test 1080p and 1440p internal rendering while keeping 2560x1600 output.",
+            "  2. Use 2560x1600 output with Original (720p) first; behavior should match T11.1.",
+            "  3. Then test 1440p and 4K internal rendering while keeping 2560x1600 output.",
             "  4. Confirm menu + gameplay + controls + language + repeated Alt-Tab + clean exit.",
             "  5. Preserve the frozen T11.1 baseline.",
             "",
