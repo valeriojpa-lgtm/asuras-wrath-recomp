@@ -10,16 +10,18 @@ GENERATED = ROOT / "generated" / "default"
 
 # Exact guest-code replacements from Xenia Canary's
 # "Resolution Scaling Fix / Disable All Post-Processing" for title 43430817.
-# Applied to generated C++ only for this diagnostic build; source XEX remains untouched.
+#
+# T11.2 does NOT permanently apply them. Each of the five sites is wrapped in a
+# runtime gate controlled by THESEUS_POSTFX_MASK (bits 0..4). This lets one EXE
+# test combinations without rebuilding between user trials.
 PATCHES = (
-    (0x8273F440, 0x8273F610, "ctx.r5.s64 = 1;", "li r5,1"),
-    (0x8273F440, 0x8273F76C, "ctx.r5.s64 = 0;", "li r5,0"),
-    (0x8273F880, 0x8273F8D8, "ctx.r4.s64 = 4;", "li r4,4"),
-    (0x82741EB0, 0x82741ED4, "ctx.r5.s64 = 0;", "li r5,0"),
-    (0x82741EB0, 0x82741EF0, "(void)0;", "nop"),
+    (0, 0x8273F440, 0x8273F610, "ctx.r5.s64 = 1;", "li r5,1"),
+    (1, 0x8273F440, 0x8273F76C, "ctx.r5.s64 = 0;", "li r5,0"),
+    (2, 0x8273F880, 0x8273F8D8, "ctx.r4.s64 = 4;", "li r4,4"),
+    (3, 0x82741EB0, 0x82741ED4, "ctx.r5.s64 = 0;", "li r5,0"),
+    (4, 0x82741EB0, 0x82741EF0, "(void)0;", "nop"),
 )
 
-FUNC_RE = re.compile(r"DEFINE_REX_FUNC\(sub_([0-9A-Fa-f]{8})\)")
 INSTR_RE = re.compile(r"^\s*//\s+(.+?)\s*$")
 LABEL_RE = re.compile(r"^\s*loc_[0-9A-Fa-f]+:\s*$")
 
@@ -57,8 +59,8 @@ def locate_instruction(lines: list[str], function_line: int, function_address: i
             address += 4
         i += 1
     raise RuntimeError(
-        f"Instruction 0x{target_address:08X} not found in function "
-        f"0x{function_address:08X}"
+        f"Instruction 0x{target_address:08X} not found in "
+        f"function 0x{function_address:08X}"
     )
 
 
@@ -67,19 +69,20 @@ def main() -> int:
     parser.add_argument("--report-only", action="store_true")
     args = parser.parse_args()
 
-    grouped: dict[Path, list[tuple[int, int, str, str, int]]] = {}
+    grouped: dict[Path, list[tuple[int, int, int, str, str, int, str]]] = {}
 
-    for function_address, target_address, replacement, replacement_asm in PATCHES:
+    for site, function_address, target_address, replacement, replacement_asm in PATCHES:
         path, lines, function_line = find_function_file(function_address)
         start, end, original_asm = locate_instruction(
             lines, function_line, function_address, target_address
         )
         print(
-            f"0x{target_address:08X}: {path.name}:{start + 1}: "
-            f"{original_asm} -> {replacement_asm}"
+            f"site {site + 1} / bit {1 << site:02d} / 0x{target_address:08X}: "
+            f"{path.name}:{start + 1}: {original_asm} -> {replacement_asm}"
         )
         grouped.setdefault(path, []).append(
-            (start, end, replacement, replacement_asm, target_address)
+            (start, end, site, replacement, replacement_asm,
+             target_address, original_asm)
         )
 
     if args.report_only:
@@ -87,19 +90,28 @@ def main() -> int:
 
     for path, patches in grouped.items():
         lines = path.read_text(encoding="utf-8", errors="strict").splitlines()
-        # Replace backwards so line numbers remain valid.
-        for start, end, replacement, replacement_asm, target_address in sorted(
+        for start, end, site, replacement, replacement_asm, target_address, original_asm in sorted(
             patches, reverse=True
         ):
             indent = re.match(r"^(\s*)", lines[start]).group(1)
+            original_impl = lines[start + 1:end]
+            nested = indent + "\t"
             new_lines = [
-                f"{indent}// THESEUS T11.2 diagnostic @ 0x{target_address:08X}: {replacement_asm}",
-                f"{indent}{replacement}",
+                f"{indent}// THESEUS T11.2 runtime diagnostic @ 0x{target_address:08X}",
+                f"{indent}// original: {original_asm} / patched: {replacement_asm}",
+                f"{indent}extern bool TheseusPostFxPatchSiteEnabled(int) noexcept;",
+                f"{indent}if (TheseusPostFxPatchSiteEnabled({site})) {{",
+                f"{nested}{replacement}",
+                f"{indent}}} else {{",
             ]
+            for original_line in original_impl:
+                new_lines.append("\t" + original_line)
+            new_lines.append(f"{indent}}}")
             lines[start:end] = new_lines
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print("Applied Asura's Wrath scaled-resolution postprocess diagnostic patch.")
+    print("Installed runtime-gated Asura postprocess diagnostic at 5 guest sites.")
+    print("Use environment variable THESEUS_POSTFX_MASK=0..31 to select patched sites.")
     return 0
 
 
