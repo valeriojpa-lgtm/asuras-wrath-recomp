@@ -30,3 +30,25 @@ jobs:
 
           echo "=== nearby function symbols / address metadata ==="
           grep -Rni -m 100 --include='*.cpp' --include='*.h' -E '8273f[0-9a-f]{3}|82741[0-9a-f]{3}' generated/default || true
+
+          echo "=== target function bodies ==="
+          python3 - <<'PY'
+          from pathlib import Path
+          targets = ["sub_8273F440", "sub_8273F880", "sub_82741EB0"]
+          for target in targets:
+              print(f"===== {target} =====")
+              found = False
+              for path in Path("generated/default").glob("asura_wrath_recomp.*.cpp"):
+                  lines = path.read_text(errors="replace").splitlines()
+                  for i, line in enumerate(lines):
+                      if f"DEFINE_REX_FUNC({target})" in line:
+                          found = True
+                          print(f"FILE {path} LINE {i+1}")
+                          for j in range(i, min(len(lines), i + 260)):
+                              print(f"{j+1}: {lines[j]}")
+                          break
+                  if found:
+                      break
+              if not found:
+                  print("NOT FOUND")
+          PY
