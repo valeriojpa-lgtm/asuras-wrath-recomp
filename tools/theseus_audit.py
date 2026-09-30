@@ -336,6 +336,9 @@ def main() -> int:
         and "platform.display().Enumerate()" in launcher_source
         and "RebuildResolutionOptions" in launcher_source
         and 'add_int("monitor", presentation.monitor)' in launcher_source
+        and '"--monitor="' in launcher_source
+        and "language=" in launcher_source
+        and " mnk=" in launcher_source
         and "Service::kDisplay" in platform_source
         and "src/platform/theseus_display.cpp" in cmake_source
         and "1920, 1200" in launcher_source
@@ -414,6 +417,8 @@ def main() -> int:
         "  The launcher resolution list is generated from the selected native display.",
         "  1920x1200 is preserved in the fallback set for 16:10 validation.",
         "  Monitor selection is persisted by Theseus and bridged temporarily to SDL.",
+        "  Runtime-child argument rebuilding removes the prior monitor override before re-appending settings.",
+        "  Stability breadcrumbs expose renderer/adapter/display/language/input selections for validation.",
         "  ReXGlue SDL Window and backend Presenter remain compatibility objects.",
         "  No Xenos command processor, shader translator or swapchain implementation is replaced yet.",
         "  The Windows executable remains x64 PE32+ with LAA/ASLR/NX/HighEntropyVA.",
