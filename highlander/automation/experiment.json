@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "automation_version": "0.1",
+  "experiment_id": "T01.7_UMAKE_MATRIX",
+  "experiment_revision": 1,
+  "description": "Automated matrix to distinguish empty ModPackages container failure from development-only UMakeCommandlet startup logic.",
+  "observation_seconds": 25,
+  "poll_milliseconds": 500,
+  "launch_args": [
+    "-windowed",
+    "-resx=1280",
+    "-resy=720",
+    "-log"
+  ],
+  "expected": {
+    "pc_exe_sha256": "98b98b017ec2073dedc7a7790a4d01ef51dc017827c624373e4ce9c2e16e2b2a",
+    "wx_core_sha256": "e26ec2bb5c4dba1bb21ed9527b2483fdf6ff88b050cfe7e4f0aa7ffd5fe42b65",
+    "wx_patched_exe_sha256": "b7d6975d243ce92c4d8b5fbb6adaea76c0a6232c076afaad6e50eeaba1f04146",
+    "nvtt_bridge_sha256": "2f960cbca1636c022716c1145e6989ec061c888fdcae4789e91287b89f67d545",
+    "physx_bridge_sha256": "6d70b51c4748183b64ff2fe1711e16a52d42e652b10b1c6212972a71ab96e804",
+    "baseline_gpf_signature": [
+      "0x42cba1",
+      "0x42d166",
+      "0x4452ad",
+      "0x40c309"
+    ]
+  },
+  "variants": [
+    {
+      "id": "A_REPRO_T016",
+      "description": "Control: reproduce T01.6 with an empty [ModPackages] list.",
+      "mod_packages": [],
+      "patches": []
+    },
+    {
+      "id": "B_MOD_HIGHLANDERGAME",
+      "description": "Populate [ModPackages] with the existing HighlanderGame package token to test the empty-container hypothesis.",
+      "mod_packages": [
+        "HighlanderGame"
+      ],
+      "patches": []
+    },
+    {
+      "id": "C_UMAKE_SKIP_FALSE",
+      "description": "Diagnostic only: bypass call 0x40C304 -> 0x445000 and force EAX=0. Tests whether UMake is development-only startup work.",
+      "mod_packages": [],
+      "patches": [
+        {
+          "kind": "file_offset_hex",
+          "offset": "0xC304",
+          "expected_hex": "E8F78C0300",
+          "replacement_hex": "31C0909090",
+          "label": "UMake call bypass / return false"
+        }
+      ]
+    },
+    {
+      "id": "D_UMAKE_SKIP_TRUE",
+      "description": "Diagnostic only: bypass call 0x40C304 -> 0x445000 and force EAX=1. Exposes the caller's success path without claiming scripts were built.",
+      "mod_packages": [],
+      "patches": [
+        {
+          "kind": "file_offset_hex",
+          "offset": "0xC304",
+          "expected_hex": "E8F78C0300",
+          "replacement_hex": "B801000000",
+          "label": "UMake call bypass / return true"
+        }
+      ]
+    }
+  ]
+}
