@@ -1,0 +1,15 @@
+{
+  "project": "Highlander THESEUS PC",
+  "phase": "T01 PC runtime resurrection",
+  "last_completed_run": "T01.6_MODPACKAGES_RECOVERY",
+  "last_observed_exit": "0xC0000005 / access violation",
+  "last_observed_stack": [
+    "0x42CBA1",
+    "0x42D166",
+    "0x4452AD",
+    "0x40C309"
+  ],
+  "t01_6_conclusion": "Adding a reconstructed [ModPackages] section without ModPackages= entries did not move the crash. Stop guessing INI keys; run controlled matrix/instrumentation.",
+  "next_experiment": "T01.7_UMAKE_MATRIX",
+  "privacy": "Runtime logs remain local and are not uploaded to this public repository."
+}
