@@ -73,7 +73,9 @@ std::vector<ResolutionOption> FallbackResolutions() {
 }
 
 constexpr const wchar_t* kRenderResolutionLabels[] = {
-    L"720p", L"1080p", L"1440p", L"Nativa", L"4K",
+    L"Original (720p)",
+    L"1440p",
+    L"4K",
 };
 
 struct LanguageOption {
@@ -234,7 +236,7 @@ void RemoveCustomLauncherArgs(std::vector<std::string>& args) {
 void RemoveManagedArgs(std::vector<std::string>& args) {
   static constexpr std::string_view prefixes[] = {
       "--window_width=", "--window_height=", "--monitor=", "--fullscreen=",
-      "--video_mode_width=", "--video_mode_height=",
+      "--resolution_scale=",
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--mnk_sensitivity=", "--theseus_hide_cursor_in_game=",
@@ -294,13 +296,14 @@ void AppendSettingsArgs(std::vector<std::string>& args,
   add_int("monitor", presentation.monitor);
   add_bool("fullscreen", presentation.fullscreen);
 
-  // T11.2: keep output size and guest render size independent.
+  // T11.2: the guest's advertised video mode is not the true internal
+  // rendering scale. ReXGlue/Xenos applies real supersampling through
+  // resolution_scale, which expands EDRAM/render targets/resolves.
   const auto render_preset = static_cast<theseus::RenderResolutionPreset>(
-      std::clamp(s.render_resolution, 0, 4));
-  const auto render_resolution = theseus::ResolveRenderResolution(
-      render_preset, presentation.width, presentation.height);
-  add_int("video_mode_width", render_resolution.width);
-  add_int("video_mode_height", render_resolution.height);
+      std::clamp(s.render_resolution, 0, 2));
+  const auto render_resolution =
+      theseus::ResolveRenderResolution(render_preset);
+  add_int("resolution_scale", render_resolution.scale);
 
   // T10 native graphics policy. Theseus owns the stable PC-facing renderer,
   // adapter, VSync and shader-compilation choices. The arguments below are a
@@ -999,7 +1002,7 @@ struct LauncherState {
                  FindResolutionIndex(settings.width, settings.height), 0);
     SendMessageW(display_mode, CB_SETCURSEL, settings.fullscreen ? 0 : 1, 0);
     SendMessageW(render_resolution, CB_SETCURSEL,
-                 std::clamp(settings.render_resolution, 0, 4), 0);
+                 std::clamp(settings.render_resolution, 0, 2), 0);
     SendMessageW(renderer, CB_SETCURSEL, std::clamp(settings.renderer, 0, 1), 0);
     SendMessageW(adapter, CB_SETCURSEL, FindAdapterComboIndex(settings.adapter), 0);
     SetCheck(vsync, settings.vsync);
@@ -1027,7 +1030,7 @@ struct LauncherState {
     settings.monitor = MonitorValueFromCombo();
     settings.render_resolution = std::clamp(
         static_cast<int>(SendMessageW(render_resolution, CB_GETCURSEL, 0, 0)),
-        0, 4);
+        0, 2);
     settings.fullscreen = SendMessageW(display_mode, CB_GETCURSEL, 0, 0) == 0;
     settings.renderer =
         std::clamp(static_cast<int>(SendMessageW(renderer, CB_GETCURSEL, 0, 0)), 0, 1);
@@ -1267,7 +1270,7 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       " render_preset=" +
       std::string(theseus::RenderResolutionPresetName(
           static_cast<theseus::RenderResolutionPreset>(
-              std::clamp(state.settings.render_resolution, 0, 4)))) +
+              std::clamp(state.settings.render_resolution, 0, 2)))) +
       " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
       " vsync=" + (state.settings.vsync ? "1" : "0") +
       " async_shaders=" + (state.settings.async_shaders ? "1" : "0") +
@@ -1278,13 +1281,11 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       std::string(state.settings.input_backend == 1 ? "xinput" : "sdl");
   const auto resolved_render = theseus::ResolveRenderResolution(
       static_cast<theseus::RenderResolutionPreset>(
-          std::clamp(state.settings.render_resolution, 0, 4)),
-      state.settings.width, state.settings.height);
-  stability += " render=" + std::to_string(resolved_render.width) + "x" +
-               std::to_string(resolved_render.height);
-  if (resolved_render.capped) {
-    stability += " render_capped=1";
-  }
+          std::clamp(state.settings.render_resolution, 0, 2)));
+  stability += " render_scale=" + std::to_string(resolved_render.scale) +
+               " render_reference=" +
+               std::to_string(resolved_render.reference_width) + "x" +
+               std::to_string(resolved_render.reference_height);
   theseus::crash::Breadcrumb(stability);
 
   if (!runtime_child) {
