@@ -1,0 +1,32 @@
+name: THESEUS T11.2 - Postprocess Patch Map
+
+on:
+  push:
+    branches:
+      - theseus/t11-2-native-render-resolution
+  workflow_dispatch:
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Map Asura resolution-fix addresses
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== exact guest addresses ==="
+          for a in 8273f610 8273f76c 8273f8d8 82741ed4 82741ef0; do
+            echo "--- $a ---"
+            grep -Rni -m 20 --include='*.cpp' --include='*.h' --include='*.toml' "$a" generated src includes . || true
+            grep -Rni -m 20 --include='*.cpp' --include='*.h' --include='*.toml' "0x${a}" generated src includes . || true
+          done
+
+          echo "=== replacement PPC opcodes ==="
+          for op in 38a00001 38a00000 38800004 60000000; do
+            echo "--- $op ---"
+            grep -Rni -m 30 --include='*.cpp' --include='*.h' --include='*.toml' "$op" generated src includes . || true
+          done
+
+          echo "=== nearby function symbols / address metadata ==="
+          grep -Rni -m 100 --include='*.cpp' --include='*.h' -E '8273f[0-9a-f]{3}|82741[0-9a-f]{3}' generated/default || true
