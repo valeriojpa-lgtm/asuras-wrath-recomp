@@ -903,9 +903,12 @@ struct LauncherState {
     int secondary_number = 2;
     for (size_t i = 0; i < monitors.size(); ++i) {
       const auto& display = monitors[i];
-      const std::wstring label =
-          display.primary ? L"Principal"
-                          : L"Pantalla " + std::to_wstring(secondary_number++);
+      std::wstring label;
+      if (display.primary) {
+        label = L"Principal";
+      } else {
+        label = L"Pantalla " + std::to_wstring(secondary_number++);
+      }
       monitor_values.push_back(static_cast<int>(i + 1));
       SendMessageW(monitor, CB_ADDSTRING, 0,
                    reinterpret_cast<LPARAM>(label.c_str()));
@@ -920,7 +923,7 @@ struct LauncherState {
     SendMessageW(display_mode, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"Windowed"));
 
-    CreateLabel(hwnd, font, L"Render", 478, 96, 70, 24);
+    CreateLabel(hwnd, font, L"Interna", 478, 96, 70, 24);
     render_resolution =
         CreateCombo(hwnd, font, kRenderResolution, 548, 92, 185, 150);
     for (const auto* label : kRenderResolutionLabels) {
@@ -1261,6 +1264,10 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       " resolution=" + std::to_string(state.settings.width) + "x" +
       std::to_string(state.settings.height) +
       " monitor=" + std::to_string(state.settings.monitor) +
+      " render_preset=" +
+      std::string(theseus::RenderResolutionPresetName(
+          static_cast<theseus::RenderResolutionPreset>(
+              std::clamp(state.settings.render_resolution, 0, 4)))) +
       " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
       " vsync=" + (state.settings.vsync ? "1" : "0") +
       " async_shaders=" + (state.settings.async_shaders ? "1" : "0") +
@@ -1269,6 +1276,15 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
       " mnk=" + (state.settings.mnk ? "1" : "0") +
       " input=" +
       std::string(state.settings.input_backend == 1 ? "xinput" : "sdl");
+  const auto resolved_render = theseus::ResolveRenderResolution(
+      static_cast<theseus::RenderResolutionPreset>(
+          std::clamp(state.settings.render_resolution, 0, 4)),
+      state.settings.width, state.settings.height);
+  stability += " render=" + std::to_string(resolved_render.width) + "x" +
+               std::to_string(resolved_render.height);
+  if (resolved_render.capped) {
+    stability += " render_capped=1";
+  }
   theseus::crash::Breadcrumb(stability);
 
   if (!runtime_child) {
