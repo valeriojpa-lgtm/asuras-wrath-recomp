@@ -1,4 +1,4 @@
-name: THESEUS T11.2 - Native Render Resolution
+name: THESEUS T11.2 - Automated PostFX Diagnostic
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build portable T11.2 render-resolution candidate
+    name: Build one-click T11.2 PostFX diagnostic
     runs-on: windows-latest
     timeout-minutes: 90
 
@@ -44,9 +44,13 @@ jobs:
         shell: powershell
         run: |
           $hits = Get-ChildItem "generated/default/asura_wrath_recomp.*.cpp" |
-            Select-String -Pattern "THESEUS T11.2 diagnostic @"
+            Select-String -Pattern "THESEUS T11.2 runtime diagnostic @"
           if ($hits.Count -ne 5) {
-            throw "Expected 5 Asura postprocess diagnostic replacements, found $($hits.Count)."
+            throw "Expected 5 runtime-gated Asura PostFX sites, found $($hits.Count)."
+          }
+          $helper = Get-Content "src/compat/theseus_postfx_diag.cpp" -Raw
+          if ($helper -notmatch "THESEUS_POSTFX_MASK") {
+            throw "Runtime PostFX diagnostic controller is missing."
           }
           $hits | ForEach-Object { Write-Host $_.Line }
 
@@ -213,36 +217,38 @@ jobs:
           Copy-Item "out/theseus/THESEUS_STATUS.txt" "$dist/THESEUS_STATUS.txt"
           Copy-Item "out/theseus/THESEUS_PE_STATUS.txt" "$dist/THESEUS_PE_STATUS.txt"
           Copy-Item "docs/THESEUS_ARCHITECTURE.md" "$dist/THESEUS_ARCHITECTURE.md"
+          Copy-Item "tools/Diagnostico_PostFX.bat" "$dist/Diagnostico_PostFX.bat"
+          Copy-Item "tools/PostFxDiagnostic.ps1" "$dist/PostFxDiagnostic.ps1"
 
           $readme = @(
             "ASURA'S WRATH - THESEUS T11.2 NATIVE RENDER RESOLUTION",
             "======================================================",
             "",
-            "T11.2 postprocess diagnostic candidate.",
+            "T11.2 automated postprocess diagnostic.",
             "",
             "Base: validated/frozen T11.1 native display modes.",
             "Theseus now separates physical output resolution from guest render resolution.",
             "True render presets: Original (720p) / 1440p / 4K.",
-            "DIAGNOSTIC: exact Asura resolution-scaling postprocess bypass is compiled in.",
-            "This build intentionally changes/disables postprocessing to confirm the green-corruption cause.",
+            "DIAGNOSTIC: the five Asura postprocess patch sites are runtime-selectable.",
+            "Do not test them manually. Run Diagnostico_PostFX.bat.",
             "Monitor labels are compact: Automática / Principal / Pantalla N.",
             "",
             "SDL Window/monitor application, D3D12/Vulkan Presenter, swapchain, Xenos command processor and shader translator remain compatibility-backed.",
             "",
             "Place this folder next to your existing Data folder and launch Asura's Wrath.exe normally.",
             "",
-            "Validation:",
-            "  1. Confirm monitor labels are concise.",
-            "  2. Set internal rendering to 1440p.",
-            "  3. Check whether the green/black corruption disappears at the title screen/gameplay.",
-            "  4. Confirm menu + gameplay + controls + language + repeated Alt-Tab + clean exit.",
+            "Automated validation:",
+            "  1. Double-click Diagnostico_PostFX.bat.",
+            "  2. The diagnostic forces 1440p internally and launches only the combinations it needs.",
+            "  3. After each run, answer S/N to whether the green/black corruption disappeared.",
+            "  4. When finished, upload UserData\\Diagnostics\\PostFX_Diagnostic.txt.",
             "  5. Preserve the frozen T11.1 baseline.",
             "",
             "Preserve UserData\Logs if any unexpected exit occurs."
           )
           Set-Content -Encoding UTF8 -Path "$dist\THESEUS_README.txt" -Value $readme
 
-          $zip = "out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip"
+          $zip = "out/dist/AW_POSTFX_AUTO.zip"
           if (Test-Path $zip) { Remove-Item -Force $zip }
           Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
 
@@ -260,14 +266,14 @@ jobs:
             throw "T11.2 package contains forbidden diagnostic files: $($forbidden.Name -join ', ')"
           }
 
-          $zip = Get-Item "out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip"
+          $zip = Get-Item "out/dist/AW_POSTFX_AUTO.zip"
           Write-Host "Portable package: $($zip.FullName)"
           Write-Host "Size: $($zip.Length) bytes"
 
-      - name: Upload portable T11.2 render resolution
+      - name: Upload one-click PostFX diagnostic
         uses: actions/upload-artifact@v4
         with:
-          name: ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG
-          path: out/dist/ASURAS_WRATH_THESEUS_T11_2_POSTFX_DIAG.zip
+          name: AW_POSTFX_AUTO
+          path: out/dist/AW_POSTFX_AUTO.zip
           if-no-files-found: error
           retention-days: 30
