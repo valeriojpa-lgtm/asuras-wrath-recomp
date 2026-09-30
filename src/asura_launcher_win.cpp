@@ -228,7 +228,7 @@ void RemoveCustomLauncherArgs(std::vector<std::string>& args) {
 
 void RemoveManagedArgs(std::vector<std::string>& args) {
   static constexpr std::string_view prefixes[] = {
-      "--window_width=", "--window_height=", "--fullscreen=",
+      "--window_width=", "--window_height=", "--monitor=", "--fullscreen=",
       "--gpu_backend=", "--d3d12_adapter=", "--vsync=",
       "--async_shader_compilation=", "--mnk_mode=", "--mnk_mouse=",
       "--mnk_sensitivity=", "--theseus_hide_cursor_in_game=",
@@ -1221,11 +1221,18 @@ bool RunNativeLauncher(std::vector<std::string>& args) {
   std::string stability =
       "launcher: play renderer=" +
       std::string(state.settings.renderer == 1 ? "vulkan" : "d3d12") +
+      " adapter=" + std::to_string(state.settings.adapter) +
       " resolution=" + std::to_string(state.settings.width) + "x" +
       std::to_string(state.settings.height) +
+      " monitor=" + std::to_string(state.settings.monitor) +
       " fullscreen=" + (state.settings.fullscreen ? "1" : "0") +
       " vsync=" + (state.settings.vsync ? "1" : "0") +
-      " async_shaders=" + (state.settings.async_shaders ? "1" : "0");
+      " async_shaders=" + (state.settings.async_shaders ? "1" : "0") +
+      " language=" + std::to_string(state.settings.language) +
+      " country=" + std::to_string(state.settings.country) +
+      " mnk=" + (state.settings.mnk ? "1" : "0") +
+      " input=" +
+      std::string(state.settings.input_backend == 1 ? "xinput" : "sdl");
   theseus::crash::Breadcrumb(stability);
 
   if (!runtime_child) {
